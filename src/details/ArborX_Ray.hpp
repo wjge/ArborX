@@ -15,30 +15,78 @@
 
 #include <Kokkos_Macros.hpp>
 
+#include <cassert>
+#include <cmath>
+
 namespace ArborX
 {
 struct Ray
 {
+  using Vector = Point; // will regret this later
+
+  using Scalar = std::decay_t<decltype(std::declval<Vector>()[0])>;
+
+  class Normalized
+  {
+    Vector v_;
+
+  public:
+    explicit Normalized(Vector const &v)
+        : v_{v}
+    {
+    }
+    operator Vector &() { return v_; }
+    operator Vector const &() const { return v_; }
+  };
+
   KOKKOS_DEFAULTED_FUNCTION
   constexpr Ray() = default;
 
-  KOKKOS_INLINE_FUNCTION
-  constexpr Ray(Point const &origin, Point const &direction)
+  KOKKOS_FUNCTION
+  constexpr Ray(Point const &origin, Vector const &direction)
+      : _origin(origin)
+      , _direction(direction)
+  {
+    normalize(_direction);
+  }
+
+  KOKKOS_FUNCTION
+  constexpr Ray(Point const &origin, Normalized const &direction)
       : _origin(origin)
       , _direction(direction)
   {
   }
 
-  KOKKOS_INLINE_FUNCTION
+  KOKKOS_FUNCTION static Scalar norm_sq(Vector const &v)
+  {
+    Scalar sq{};
+    for (int d = 0; d < 3; ++d)
+      sq += v[d] * v[d];
+    return sq;
+  }
+  KOKKOS_FUNCTION static Scalar norm(Vector const &v)
+  {
+    return std::sqrt(norm_sq(v));
+  }
+
+  KOKKOS_FUNCTION static void normalize(Vector &v)
+  {
+    auto const n = norm(v);
+    assert(n > 0);
+    for (int d = 0; d < 3; ++d)
+      v[d] /= n;
+  }
+
+  KOKKOS_FUNCTION
   constexpr Point &origin() { return _origin; }
 
-  KOKKOS_INLINE_FUNCTION
+  KOKKOS_FUNCTION
   constexpr Point const &origin() const { return _origin; }
 
-  KOKKOS_INLINE_FUNCTION
+  KOKKOS_FUNCTION
   constexpr Point &direction() { return _direction; }
 
-  KOKKOS_INLINE_FUNCTION
+  KOKKOS_FUNCTION
   constexpr Point const &direction() const { return _direction; }
 
   Point _origin = {};
