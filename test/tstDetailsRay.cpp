@@ -34,15 +34,16 @@ Point operator*(Ray::Scalar a, Point p)
   return p;
 }
 
-/*KOKKOS_INLINE_FUNCTION*/ bool intersects(Ray const &r, Box const &b)
+//KOKKOS_INLINE_FUNCTION
+bool intersects(Ray const &r, Box const &b)
 {
   using KokkosExt::min;
-  using KokkosExt::sgn;
+  //using KokkosExt::sgn;
   for (int d = 0; d < 3; ++d)
   {
-    auto const sign = sgn(r.direction()[d]);
-    if (sign == 0)
-      continue;
+    //auto const sign = sgn(r.direction()[d]);
+    //if (sign == 0)
+    //  continue;
     for (auto proj : {b.minCorner()[d], b.maxCorner()[d]})
     {
       auto dot = (proj - r.origin()[d]);
@@ -58,6 +59,7 @@ Point operator*(Ray::Scalar a, Point p)
   }
   return false;
 }
+
 } // namespace Details
 } // namespace ArborX
 

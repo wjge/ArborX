@@ -30,12 +30,18 @@ struct Ray
   {
     Vector v_;
 
-  public:
+    public:
+
+    KOKKOS_FUNCTION
     explicit Normalized(Vector const &v)
-        : v_{v}
+      : v_{v}
     {
     }
+    
+    KOKKOS_FUNCTION
     operator Vector &() { return v_; }
+
+    KOKKOS_FUNCTION
     operator Vector const &() const { return v_; }
   };
 
@@ -65,6 +71,7 @@ struct Ray
       sq += v[d] * v[d];
     return sq;
   }
+
   KOKKOS_FUNCTION 
   static constexpr Scalar norm(Vector const &v)
   {
