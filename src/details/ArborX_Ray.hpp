@@ -43,7 +43,7 @@ struct Ray
   constexpr Ray() = default;
 
   KOKKOS_FUNCTION
-  constexpr Ray(Point const &origin, Vector const &direction)
+  Ray(Point const &origin, Vector const &direction)
       : _origin(origin)
       , _direction(direction)
   {
@@ -51,25 +51,27 @@ struct Ray
   }
 
   KOKKOS_FUNCTION
-  constexpr Ray(Point const &origin, Normalized const &direction)
+  Ray(Point const &origin, Normalized const &direction)
       : _origin(origin)
       , _direction(direction)
   {
   }
 
-  KOKKOS_FUNCTION static Scalar norm_sq(Vector const &v)
+  KOKKOS_FUNCTION 
+  static constexpr Scalar norm_sq(Vector const &v)
   {
     Scalar sq{};
     for (int d = 0; d < 3; ++d)
       sq += v[d] * v[d];
     return sq;
   }
-  KOKKOS_FUNCTION static Scalar norm(Vector const &v)
+  KOKKOS_FUNCTION 
+  static constexpr Scalar norm(Vector const &v)
   {
     return std::sqrt(norm_sq(v));
   }
 
-  KOKKOS_FUNCTION static void normalize(Vector &v)
+  KOKKOS_FUNCTION static void normalize (Vector &v)
   {
     auto const n = norm(v);
     assert(n > 0);
