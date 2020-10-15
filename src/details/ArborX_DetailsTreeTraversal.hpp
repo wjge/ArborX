@@ -13,12 +13,11 @@
 
 #include <ArborX_AccessTraits.hpp>
 #include <ArborX_DetailsAlgorithms.hpp>
-#include <ArborX_DetailsNode.hpp>
+#include <ArborX_DetailsNode.hpp> // ROPE_SENTINEL
 #include <ArborX_DetailsPriorityQueue.hpp>
 #include <ArborX_DetailsStack.hpp>
 #include <ArborX_DetailsUtils.hpp>
 #include <ArborX_Exception.hpp>
-#include <ArborX_Macros.hpp>
 #include <ArborX_Predicates.hpp>
 
 namespace ArborX
@@ -39,6 +38,7 @@ struct TreeTraversal<BVH, Predicates, Callback, SpatialPredicateTag>
   Callback callback_;
 
   using Access = AccessTraits<Predicates, PredicatesTag>;
+  using Node = typename BVH::node_type;
 
   template <typename ExecutionSpace>
   TreeTraversal(ExecutionSpace const &space, BVH const &bvh,
@@ -54,14 +54,19 @@ struct TreeTraversal<BVH, Predicates, Callback, SpatialPredicateTag>
     else if (bvh_.size() == 1)
     {
       Kokkos::parallel_for(
-          ARBORX_MARK_REGION("BVH:spatial_queries_degenerated_one_leaf_tree"),
+          "ArborX::TreeTraversal::spatial::degenerated_one_leaf_tree",
           Kokkos::RangePolicy<ExecutionSpace, OneLeafTree>(
               space, 0, Access::size(predicates)),
           *this);
     }
     else
     {
-      Kokkos::parallel_for(ARBORX_MARK_REGION("BVH:spatial_queries"),
+      static_assert(
+          std::is_same<typename Node::Tag, NodeWithTwoChildrenTag>{} ||
+              std::is_same<typename Node::Tag, NodeWithLeftChildAndRopeTag>{},
+          "Unrecognized node tag");
+
+      Kokkos::parallel_for("ArborX::TreeTraversal::spatial",
                            Kokkos::RangePolicy<ExecutionSpace>(
                                space, 0, Access::size(predicates)),
                            *this);
@@ -82,7 +87,10 @@ struct TreeTraversal<BVH, Predicates, Callback, SpatialPredicateTag>
     }
   }
 
-  KOKKOS_FUNCTION void operator()(int queryIndex) const
+  // Stack-based traversal
+  template <typename Tag = typename Node::Tag>
+  KOKKOS_FUNCTION std::enable_if_t<std::is_same<Tag, NodeWithTwoChildrenTag>{}>
+  operator()(int queryIndex) const
   {
     auto const &predicate = Access::get(predicates_, queryIndex);
 
@@ -92,8 +100,8 @@ struct TreeTraversal<BVH, Predicates, Callback, SpatialPredicateTag>
     Node const *node = bvh_.getRoot();
     do
     {
-      Node const *child_left = bvh_.getNodePtr(node->children.first);
-      Node const *child_right = bvh_.getNodePtr(node->children.second);
+      Node const *child_left = bvh_.getNodePtr(node->left_child);
+      Node const *child_right = bvh_.getNodePtr(node->right_child);
 
       bool overlap_left = predicate(bvh_.getBoundingVolume(child_left));
       bool overlap_right = predicate(bvh_.getBoundingVolume(child_right));
@@ -122,6 +130,40 @@ struct TreeTraversal<BVH, Predicates, Callback, SpatialPredicateTag>
       }
     } while (node != nullptr);
   }
+
+  // Ropes-based traversal
+  template <typename Tag = typename Node::Tag>
+  KOKKOS_FUNCTION
+      std::enable_if_t<std::is_same<Tag, NodeWithLeftChildAndRopeTag>{}>
+      operator()(int queryIndex) const
+  {
+    auto const &predicate = Access::get(predicates_, queryIndex);
+
+    Node const *node;
+    int next = 0; // start with root
+    do
+    {
+      node = bvh_.getNodePtr(next);
+
+      if (predicate(bvh_.getBoundingVolume(node)))
+      {
+        if (!node->isLeaf())
+        {
+          next = node->left_child;
+        }
+        else
+        {
+          callback_(predicate, node->getLeafPermutationIndex());
+          next = node->rope;
+        }
+      }
+      else
+      {
+        next = node->rope;
+      }
+
+    } while (next != ROPE_SENTINEL);
+  }
 };
 
 template <typename BVH, typename Predicates, typename Callback>
@@ -134,6 +176,7 @@ struct TreeTraversal<BVH, Predicates, Callback, NearestPredicateTag>
   Callback callback_;
 
   using Access = AccessTraits<Predicates, PredicatesTag>;
+  using Node = typename BVH::node_type;
 
   using Buffer = Kokkos::View<Kokkos::pair<int, float> *, MemorySpace>;
   using Offset = Kokkos::View<int *, MemorySpace>;
@@ -157,12 +200,14 @@ struct TreeTraversal<BVH, Predicates, Callback, NearestPredicateTag>
   {
     auto const n_queries = Access::size(predicates_);
 
-    Offset offset(Kokkos::ViewAllocateWithoutInitializing("offset"),
+    Offset offset(Kokkos::ViewAllocateWithoutInitializing(
+                      "ArborX::TreeTraversal::nearest::offset"),
                   n_queries + 1);
     // NOTE workaround to avoid implicit capture of *this
     auto const &predicates = predicates_;
     Kokkos::parallel_for(
-        ARBORX_MARK_REGION("scan_queries_for_numbers_of_nearest_neighbors"),
+        "ArborX::TreeTraversal::nearest::"
+        "scan_queries_for_numbers_of_neighbors",
         Kokkos::RangePolicy<ExecutionSpace>(space, 0, n_queries),
         KOKKOS_LAMBDA(int i) { offset(i) = getK(Access::get(predicates, i)); });
     exclusivePrefixSum(space, offset);
@@ -172,7 +217,8 @@ struct TreeTraversal<BVH, Predicates, Callback, NearestPredicateTag>
     // It is not possible to anticipate how much memory to allocate since the
     // number of nearest neighbors k is only known at runtime.
 
-    Buffer buffer(Kokkos::ViewAllocateWithoutInitializing("buffer"),
+    Buffer buffer(Kokkos::ViewAllocateWithoutInitializing(
+                      "ArborX::TreeTraversal::nearest::buffer"),
                   buffer_size);
     buffer_ = BufferProvider{buffer, offset};
   }
@@ -191,16 +237,21 @@ struct TreeTraversal<BVH, Predicates, Callback, NearestPredicateTag>
     else if (bvh_.size() == 1)
     {
       Kokkos::parallel_for(
-          ARBORX_MARK_REGION("BVH:nearest_queries_degenerated_one_leaf_tree"),
+          "ArborX::TreeTraversal::nearest::degenerated_one_leaf_tree",
           Kokkos::RangePolicy<ExecutionSpace, OneLeafTree>(
               space, 0, Access::size(predicates)),
           *this);
     }
     else
     {
+      static_assert(
+          std::is_same<typename Node::Tag, NodeWithLeftChildAndRopeTag>{} ||
+              std::is_same<typename Node::Tag, NodeWithTwoChildrenTag>{},
+          "Unrecognized node tag");
+
       allocateBuffer(space);
 
-      Kokkos::parallel_for(ARBORX_MARK_REGION("BVH:nearest_queries"),
+      Kokkos::parallel_for("ArborX::TreeTraversal::nearest",
                            Kokkos::RangePolicy<ExecutionSpace>(
                                space, 0, Access::size(predicates)),
                            *this);
@@ -226,6 +277,24 @@ struct TreeTraversal<BVH, Predicates, Callback, NearestPredicateTag>
 
     callback_(predicate, 0, distance(bvh_.getRoot()));
     return 1;
+  }
+
+  template <typename Tag = typename Node::Tag>
+  KOKKOS_FUNCTION
+      std::enable_if_t<std::is_same<Tag, NodeWithTwoChildrenTag>{}, int>
+      getRightChild(Node const *node) const
+  {
+    assert(!node->isLeaf());
+    return node->right_child;
+  }
+
+  template <typename Tag = typename Node::Tag>
+  KOKKOS_FUNCTION
+      std::enable_if_t<std::is_same<Tag, NodeWithLeftChildAndRopeTag>{}, int>
+      getRightChild(Node const *node) const
+  {
+    assert(!node->isLeaf());
+    return bvh_.getNodePtr(node->left_child)->rope;
   }
 
   KOKKOS_FUNCTION int operator()(int queryIndex) const
@@ -297,8 +366,8 @@ struct TreeTraversal<BVH, Predicates, Callback, NearestPredicateTag>
       {
         // Insert children into the stack and make sure that the
         // closest one ends on top.
-        child_left = bvh_.getNodePtr(node->children.first);
-        child_right = bvh_.getNodePtr(node->children.second);
+        child_left = bvh_.getNodePtr(node->left_child);
+        child_right = bvh_.getNodePtr(getRightChild(node));
 
         distance_left = distance(child_left);
         distance_right = distance(child_right);

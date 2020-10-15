@@ -75,16 +75,27 @@ private:
   friend struct Details::TreeTraversal;
   template <typename DeviceType>
   friend struct Details::TreeVisualization;
-  using Node = Details::Node;
 
-  Kokkos::View<Node *, MemorySpace> getInternalNodes()
+#if defined(KOKKOS_ENABLE_CUDA)
+  // Ropes based traversal is only used for CUDA, as it was found to be slower
+  // than regular one for Power9 on Summit.
+  // TODO: determine whether it should also be use for AMD GPUs
+  using node_type =
+      std::conditional_t<std::is_same<MemorySpace, Kokkos::CudaSpace>{},
+                         Details::NodeWithLeftChildAndRope,
+                         Details::NodeWithTwoChildren>;
+#else
+  using node_type = Details::NodeWithTwoChildren;
+#endif
+
+  Kokkos::View<node_type *, MemorySpace> getInternalNodes()
   {
     assert(!empty());
     return Kokkos::subview(_internal_and_leaf_nodes,
                            std::make_pair(size_type{0}, size() - 1));
   }
 
-  Kokkos::View<Node *, MemorySpace> getLeafNodes()
+  Kokkos::View<node_type *, MemorySpace> getLeafNodes()
   {
     assert(!empty());
     return Kokkos::subview(_internal_and_leaf_nodes,
@@ -92,29 +103,32 @@ private:
   }
 
   KOKKOS_FUNCTION
-  Node const *getRoot() const { return _internal_and_leaf_nodes.data(); }
+  node_type const *getRoot() const { return _internal_and_leaf_nodes.data(); }
 
   KOKKOS_FUNCTION
-  Node *getRoot() { return _internal_and_leaf_nodes.data(); }
+  node_type *getRoot() { return _internal_and_leaf_nodes.data(); }
 
   KOKKOS_FUNCTION
-  Node const *getNodePtr(int i) const { return &_internal_and_leaf_nodes(i); }
+  node_type const *getNodePtr(int i) const
+  {
+    return &_internal_and_leaf_nodes(i);
+  }
 
   KOKKOS_FUNCTION
-  bounding_volume_type const &getBoundingVolume(Node const *node) const
+  bounding_volume_type const &getBoundingVolume(node_type const *node) const
   {
     return node->bounding_box;
   }
 
   KOKKOS_FUNCTION
-  bounding_volume_type &getBoundingVolume(Node *node)
+  bounding_volume_type &getBoundingVolume(node_type *node)
   {
     return node->bounding_box;
   }
 
   size_t _size;
   bounding_volume_type _bounds;
-  Kokkos::View<Node *, MemorySpace> _internal_and_leaf_nodes;
+  Kokkos::View<node_type *, MemorySpace> _internal_and_leaf_nodes;
 };
 
 template <typename DeviceType>
@@ -147,11 +161,11 @@ template <typename ExecutionSpace, typename Primitives>
 BoundingVolumeHierarchy<MemorySpace, Enable>::BoundingVolumeHierarchy(
     ExecutionSpace const &space, Primitives const &primitives)
     : _size(AccessTraits<Primitives, PrimitivesTag>::size(primitives))
-    , _internal_and_leaf_nodes(
-          Kokkos::ViewAllocateWithoutInitializing("internal_and_leaf_nodes"),
-          _size > 0 ? 2 * _size - 1 : 0)
+    , _internal_and_leaf_nodes(Kokkos::ViewAllocateWithoutInitializing(
+                                   "ArborX::BVH::internal_and_leaf_nodes"),
+                               _size > 0 ? 2 * _size - 1 : 0)
 {
-  Kokkos::Profiling::pushRegion("ArborX:BVH:construction");
+  Kokkos::Profiling::pushRegion("ArborX::BVH::BVH");
 
   Details::check_valid_access_traits(PrimitivesTag{}, primitives);
   using Access = AccessTraits<Primitives, PrimitivesTag>;
@@ -161,10 +175,12 @@ BoundingVolumeHierarchy<MemorySpace, Enable>::BoundingVolumeHierarchy(
 
   if (empty())
   {
+    Kokkos::Profiling::popRegion();
     return;
   }
 
-  Kokkos::Profiling::pushRegion("ArborX:BVH:calculate_scene_bounding_box");
+  Kokkos::Profiling::pushRegion(
+      "ArborX::BVH::BVH::calculate_scene_bounding_box");
 
   // determine the bounding box of the scene
   Details::TreeConstruction::calculateBoundingBoxOfTheScene(space, primitives,
@@ -174,50 +190,34 @@ BoundingVolumeHierarchy<MemorySpace, Enable>::BoundingVolumeHierarchy(
 
   if (size() == 1)
   {
-    Kokkos::View<unsigned int *, MemorySpace> permutation_indices(
-        Kokkos::view_alloc("permute", space), 1);
-    Details::TreeConstruction::initializeLeafNodes(
-        space, primitives, permutation_indices, getLeafNodes());
+    Details::TreeConstruction::initializeSingleLeafNode(
+        space, primitives, _internal_and_leaf_nodes);
+    Kokkos::Profiling::popRegion();
     return;
   }
 
-  Kokkos::Profiling::pushRegion("ArborX:BVH:assign_morton_codes");
+  Kokkos::Profiling::pushRegion("ArborX::BVH::BVH::assign_morton_codes");
 
   // calculate Morton codes of all objects
   Kokkos::View<unsigned int *, MemorySpace> morton_indices(
-      Kokkos::ViewAllocateWithoutInitializing("morton"), size());
+      Kokkos::ViewAllocateWithoutInitializing("ArborX::BVH::BVH::morton"),
+      size());
   Details::TreeConstruction::assignMortonCodes(space, primitives,
                                                morton_indices, _bounds);
 
   Kokkos::Profiling::popRegion();
-  Kokkos::Profiling::pushRegion("ArborX:BVH:sort_morton_codes");
+  Kokkos::Profiling::pushRegion("ArborX::BVH::BVH::sort_morton_codes");
 
   // compute the ordering of primitives along Z-order space-filling curve
   auto permutation_indices = Details::sortObjects(space, morton_indices);
 
   Kokkos::Profiling::popRegion();
-  Kokkos::Profiling::pushRegion("ArborX:BVH:init_leaves");
-
-  // initialize leaves using the computed ordering
-  Details::TreeConstruction::initializeLeafNodes(
-      space, primitives, permutation_indices, getLeafNodes());
-
-  Kokkos::Profiling::popRegion();
-  Kokkos::Profiling::pushRegion("ArborX:BVH:generate_hierarchy");
+  Kokkos::Profiling::pushRegion("ArborX::BVH::BVH::generate_hierarchy");
 
   // generate bounding volume hierarchy
-  Kokkos::View<int *, MemorySpace> parents(
-      Kokkos::ViewAllocateWithoutInitializing("parents"), 2 * size() - 1);
   Details::TreeConstruction::generateHierarchy(
-      space, morton_indices, getLeafNodes(), getInternalNodes(), parents);
-
-  Kokkos::Profiling::popRegion();
-  Kokkos::Profiling::pushRegion("ArborX:BVH:calculate_bounding_volumes");
-
-  // calculate bounding volume for each internal node by walking the
-  // hierarchy toward the root
-  Details::TreeConstruction::calculateInternalNodesBoundingVolumes(
-      space, getLeafNodes(), getInternalNodes(), parents);
+      space, primitives, permutation_indices, morton_indices, getLeafNodes(),
+      getInternalNodes());
 
   Kokkos::Profiling::popRegion();
   Kokkos::Profiling::popRegion();

@@ -20,9 +20,6 @@
 namespace ArborX
 {
 
-template <typename DeviceType, typename Enable>
-class BoundingVolumeHierarchy;
-
 namespace Details
 {
 std::ostream &operator<<(std::ostream &os, Point const &p)
@@ -39,58 +36,52 @@ struct TreeVisualization
                 "tree visualization only available on the host");
   struct TreeAccess
   {
-    KOKKOS_INLINE_FUNCTION
-    static Node const *getLeaf(
-        BoundingVolumeHierarchy<typename DeviceType::memory_space, void> const
-            &bvh,
-        size_t index)
+    template <typename Tree>
+    KOKKOS_INLINE_FUNCTION static typename Tree::node_type const *
+    getLeaf(Tree const &tree, size_t index)
     {
-      auto leaf_nodes = bvh.getLeafNodes();
-      Node const *first = leaf_nodes.data();
-      Node const *last = first + static_cast<ptrdiff_t>(leaf_nodes.size());
+      auto leaf_nodes = tree.getLeafNodes();
+      auto const *first = leaf_nodes.data();
+      auto const *last = first + static_cast<ptrdiff_t>(leaf_nodes.size());
       for (; first != last; ++first)
         if (index == first->getLeafPermutationIndex())
           return first;
       return nullptr;
     }
 
-    KOKKOS_INLINE_FUNCTION
-    static int getIndex(
-        Node const *node,
-        BoundingVolumeHierarchy<typename DeviceType::memory_space, void> const
-            &bvh)
+    template <typename Tree>
+    KOKKOS_INLINE_FUNCTION static int
+    getIndex(typename Tree::node_type const *node, Tree const &tree)
     {
       return node->isLeaf() ? node->getLeafPermutationIndex()
-                            : node - bvh.getRoot();
+                            : node - tree.getRoot();
     }
 
-    KOKKOS_INLINE_FUNCTION
-    static Node const *getRoot(
-        BoundingVolumeHierarchy<typename DeviceType::memory_space, void> const
-            &bvh)
+    template <typename Tree>
+    KOKKOS_INLINE_FUNCTION static typename Tree::node_type const *
+    getRoot(Tree const &tree)
     {
-      return bvh.getRoot();
+      return tree.getRoot();
     }
 
-    KOKKOS_INLINE_FUNCTION
-    static Node const *getNodePtr(
-        BoundingVolumeHierarchy<typename DeviceType::memory_space, void> const
-            &bvh,
-        int index)
+    template <typename Tree>
+    KOKKOS_INLINE_FUNCTION static typename Tree::node_type const *
+    getNodePtr(Tree const &tree, int index)
     {
-      return bvh.getNodePtr(index);
+      return tree.getNodePtr(index);
     }
 
     template <typename Tree>
     KOKKOS_INLINE_FUNCTION static typename Tree::bounding_volume_type
-    getBoundingVolume(Node const *node, Tree const &tree)
+    getBoundingVolume(typename Tree::node_type const *node, Tree const &tree)
     {
       return tree.getBoundingVolume(node);
     }
   };
 
   template <typename Tree>
-  static std::string getNodeLabel(Node const *node, Tree const &tree)
+  static std::string getNodeLabel(typename Tree::node_type const *node,
+                                  Tree const &tree)
   {
     auto const node_is_leaf = node->isLeaf();
     auto const node_index = TreeAccess::getIndex(node, tree);
@@ -100,14 +91,16 @@ struct TreeVisualization
   }
 
   template <typename Tree>
-  static std::string getNodeAttributes(Node const *node, Tree const &)
+  static std::string getNodeAttributes(typename Tree::node_type const *node,
+                                       Tree const &)
   {
     return node->isLeaf() ? "[leaf]" : "[internal]";
   }
 
   template <typename Tree>
-  static std::string getEdgeAttributes(Node const * /*parent*/,
-                                       Node const *child, Tree const &)
+  static std::string
+  getEdgeAttributes(typename Tree::node_type const * /*parent*/,
+                    typename Tree::node_type const *child, Tree const &)
   {
     return child->isLeaf() ? "[pendant]" : "[edge]";
   }
@@ -125,13 +118,13 @@ struct TreeVisualization
     std::ostream &_os;
 
     template <typename Tree>
-    void visit(Node const *node, Tree const &tree) const
+    void visit(typename Tree::node_type const *node, Tree const &tree) const
     {
       visitNode(node, tree);
       visitEdgesStartingFromNode(node, tree);
     }
 
-    template <typename Tree>
+    template <typename Node, typename Tree>
     void visitNode(Node const *node, Tree const &tree) const
     {
       auto const node_label = getNodeLabel(node, tree);
@@ -141,15 +134,16 @@ struct TreeVisualization
     }
 
     template <typename Tree>
-    void visitEdgesStartingFromNode(Node const *node, Tree const &tree) const
+    void visitEdgesStartingFromNode(typename Tree::node_type const *node,
+                                    Tree const &tree) const
     {
       auto const node_label = getNodeLabel(node, tree);
       auto const node_is_internal = !node->isLeaf();
-      auto getNodePr = [&](int i) { return TreeAccess::getNodePtr(tree, i); };
+      auto getNodePtr = [&](int i) { return TreeAccess::getNodePtr(tree, i); };
 
       if (node_is_internal)
-        for (Node const *child : {getNodePr(node->children.first),
-                                  getNodePr(node->children.second)})
+        for (auto const *child :
+             {getNodePtr(node->left_child), getNodePtr(node->right_child)})
         {
           auto const child_label = getNodeLabel(child, tree);
           auto const edge_attributes = getEdgeAttributes(node, child, tree);
@@ -172,7 +166,7 @@ struct TreeVisualization
     std::ostream &_os;
 
     template <typename Tree>
-    void visit(Node const *node, Tree const &tree) const
+    void visit(typename Tree::node_type const *node, Tree const &tree) const
     {
       auto const node_label = getNodeLabel(node, tree);
       auto const node_attributes = getNodeAttributes(node, tree);
@@ -187,19 +181,20 @@ struct TreeVisualization
   template <typename Tree, typename Visitor>
   static void visitAllIterative(Tree const &tree, Visitor const &visitor)
   {
+    using Node = typename Tree::node_type;
     Stack<Node const *> stack;
     stack.emplace(TreeAccess::getRoot(tree));
     auto getNodePtr = [&](int i) { return TreeAccess::getNodePtr(tree, i); };
     while (!stack.empty())
     {
-      Node const *node = stack.top();
+      auto const *node = stack.top();
       stack.pop();
 
       visitor.visit(node, tree);
 
       if (!node->isLeaf())
-        for (Node const *child : {getNodePtr(node->children.first),
-                                  getNodePtr(node->children.second)})
+        for (auto const *child :
+             {getNodePtr(node->left_child), getNodePtr(node->right_child)})
           stack.push(child);
     }
   }

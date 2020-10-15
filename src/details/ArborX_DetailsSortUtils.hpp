@@ -14,7 +14,6 @@
 
 #include <ArborX_DetailsUtils.hpp> // iota
 #include <ArborX_Exception.hpp>
-#include <ArborX_Macros.hpp>
 
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Sort.hpp> // min_max_functor
@@ -72,13 +71,13 @@ sortObjects(ExecutionSpace const &space, ViewType &view)
 
   Kokkos::MinMaxScalar<ValueType> result;
   Kokkos::MinMax<ValueType> reducer(result);
-  parallel_reduce(ARBORX_MARK_REGION("find_min_max_view"),
+  parallel_reduce("ArborX::Sorting::find_min_max_view",
                   Kokkos::RangePolicy<ExecutionSpace>(space, 0, n),
                   Kokkos::Impl::min_max_functor<ViewType>(view), reducer);
   if (result.min_val == result.max_val)
   {
     Kokkos::View<SizeType *, typename ViewType::device_type> permute(
-        Kokkos::ViewAllocateWithoutInitializing("permute"), n);
+        Kokkos::ViewAllocateWithoutInitializing("ArborX::Sorting::permute"), n);
     iota(space, permute);
     return permute;
   }
@@ -107,7 +106,8 @@ sortObjects(Kokkos::Cuda const &space, ViewType &view)
       "");
 
   Kokkos::View<SizeType *, typename ViewType::device_type> permute(
-      Kokkos::ViewAllocateWithoutInitializing("permutation"), n);
+      Kokkos::ViewAllocateWithoutInitializing("ArborX::Sorting::permutation"),
+      n);
   ArborX::iota(space, permute);
 
   auto const execution_policy = thrust::cuda::par.on(space.cuda_stream());
@@ -177,7 +177,7 @@ void applyInversePermutation(ExecutionSpace const &space,
   ARBORX_ASSERT(output_view.extent(0) == input_view.extent(0));
 
   Kokkos::parallel_for(
-      ARBORX_MARK_REGION("inverse_permute"),
+      "ArborX::Sorting::inverse_permute",
       Kokkos::RangePolicy<ExecutionSpace>(space, 0, input_view.extent(0)),
       KOKKOS_LAMBDA(int i) {
         PermuteHelper::CopyOp<OutputView, InputView>::copy(
@@ -198,7 +198,7 @@ void applyPermutation(ExecutionSpace const &space,
   ARBORX_ASSERT(output_view.extent(0) == input_view.extent(0));
 
   Kokkos::parallel_for(
-      ARBORX_MARK_REGION("permute"),
+      "ArborX::Sorting::permute",
       Kokkos::RangePolicy<ExecutionSpace>(space, 0, input_view.extent(0)),
       KOKKOS_LAMBDA(int i) {
         PermuteHelper::CopyOp<OutputView, InputView>::copy(

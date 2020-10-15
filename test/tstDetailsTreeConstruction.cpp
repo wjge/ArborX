@@ -11,8 +11,8 @@
 #include "ArborX_EnableDeviceTypes.hpp" // ARBORX_DEVICE_TYPES
 #include "ArborX_EnableViewComparison.hpp"
 #include <ArborX_DetailsAlgorithms.hpp>
-#include <ArborX_DetailsKokkosExt.hpp>  // clz
 #include <ArborX_DetailsMortonCode.hpp> // expandBits, morton3D
+#include <ArborX_DetailsNode.hpp>       // ROPE SENTINEL
 #include <ArborX_DetailsSortUtils.hpp>  // sortObjects
 #include <ArborX_DetailsTreeConstruction.hpp>
 
@@ -125,119 +125,94 @@ BOOST_AUTO_TEST_CASE_TEMPLATE(indirect_sort, DeviceType, ARBORX_DEVICE_TYPES)
   BOOST_TEST(ids_host == ref, tt::per_element());
 }
 
-BOOST_AUTO_TEST_CASE(number_of_leading_zero_bits)
+template <typename MortonCodes, typename LeafNodes, typename InternalNodes>
+void generateHierarchy(MortonCodes sorted_morton_codes, LeafNodes &leaf_nodes,
+                       InternalNodes &internal_nodes)
 {
-  using KokkosExt::clz;
-  BOOST_TEST(clz(0) == 32);
-  BOOST_TEST(clz(1) == 31);
-  BOOST_TEST(clz(2) == 30);
-  BOOST_TEST(clz(3) == 30);
-  BOOST_TEST(clz(4) == 29);
-  BOOST_TEST(clz(5) == 29);
-  BOOST_TEST(clz(6) == 29);
-  BOOST_TEST(clz(7) == 29);
-  BOOST_TEST(clz(8) == 28);
-  BOOST_TEST(clz(9) == 28);
-  // bitwise exclusive OR operator to compare bits
-  BOOST_TEST(clz(1 ^ 0) == 31);
-  BOOST_TEST(clz(2 ^ 0) == 30);
-  BOOST_TEST(clz(2 ^ 1) == 30);
-  BOOST_TEST(clz(3 ^ 0) == 30);
-  BOOST_TEST(clz(3 ^ 1) == 30);
-  BOOST_TEST(clz(3 ^ 2) == 31);
-  BOOST_TEST(clz(4 ^ 0) == 29);
-  BOOST_TEST(clz(4 ^ 1) == 29);
-  BOOST_TEST(clz(4 ^ 2) == 29);
-  BOOST_TEST(clz(4 ^ 3) == 29);
+  using ArborX::Box;
+  using ArborX::Details::makeLeafNode;
+  using Node = typename LeafNodes::value_type;
+  using DeviceType = typename MortonCodes::device_type;
+
+  int const n = sorted_morton_codes.extent(0);
+
+  Kokkos::realloc(leaf_nodes, n);
+  Kokkos::realloc(internal_nodes, n - 1);
+  for (int i = 0; i < n; ++i)
+    leaf_nodes(i) = makeLeafNode(typename Node::Tag{}, i, Box{});
+
+  typename DeviceType::execution_space space{};
+
+  Kokkos::View<Box *, DeviceType> primitives("Testing::primitives", n);
+  Kokkos::View<unsigned int *, DeviceType> permutation_indices(
+      "Testing::indices", n);
+  ArborX::iota(space, permutation_indices);
+
+  ArborX::Details::TreeConstruction::generateHierarchy(
+      space, primitives, permutation_indices, sorted_morton_codes, leaf_nodes,
+      internal_nodes);
 }
 
-template <typename DeviceType>
-class FillFi
+template <typename Node, typename LeafNodes, typename InternalNodes>
+std::enable_if_t<
+    std::is_same<typename Node::Tag, ArborX::Details::NodeWithTwoChildrenTag>{}>
+traverse(LeafNodes leaf_nodes, InternalNodes internal_nodes, Node const *root,
+         std::ostringstream &sol)
 {
-public:
-  KOKKOS_INLINE_FUNCTION
-  FillFi(Kokkos::View<unsigned int *, DeviceType> fi)
-      : _fi(fi)
-  {
-  }
+  int n = leaf_nodes.extent(0);
+  auto getNodePtr = [&leaf_nodes, &internal_nodes, &n](int i) {
+    return i < n - 1 ? &internal_nodes(i) : &leaf_nodes(i - n + 1);
+  };
 
-  KOKKOS_INLINE_FUNCTION
-  void operator()(int const i) const
-  {
-    // NOTE: Morton codes below are **not** unique
-    unsigned int fi_array[] = {0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144};
+  std::function<void(Node const *, std::ostream &)> traverseRecursive;
+  traverseRecursive = [&leaf_nodes, &internal_nodes, &getNodePtr,
+                       &traverseRecursive](Node const *node, std::ostream &os) {
+    if (node->isLeaf())
+    {
+      os << "L" << node - leaf_nodes.data();
+    }
+    else
+    {
+      os << "I" << node - internal_nodes.data();
+      for (Node const *child :
+           {getNodePtr(node->left_child), getNodePtr(node->right_child)})
+        traverseRecursive(child, os);
+    }
+  };
 
-    _fi[i] = fi_array[i];
-  }
+  traverseRecursive(root, sol);
+}
 
-private:
-  Kokkos::View<unsigned int *, DeviceType> _fi;
-};
-
-template <typename DeviceType>
-class ComputeResults
+template <typename Node, typename LeafNodes, typename InternalNodes>
+std::enable_if_t<std::is_same<typename Node::Tag,
+                              ArborX::Details::NodeWithLeftChildAndRopeTag>{}>
+traverse(LeafNodes leaf_nodes, InternalNodes internal_nodes, Node const *root,
+         std::ostringstream &sol)
 {
-public:
-  KOKKOS_INLINE_FUNCTION
-  ComputeResults(Kokkos::View<unsigned int *, DeviceType> fi,
-                 Kokkos::View<int *, DeviceType> results)
-      : _fi(fi)
-      , _results(results)
-  {
-  }
+  int n = leaf_nodes.extent(0);
+  auto getNodePtr = [&leaf_nodes, &internal_nodes, &n](int i) {
+    return i < n - 1 ? &internal_nodes(i) : &leaf_nodes(i - n + 1);
+  };
 
-  KOKKOS_INLINE_FUNCTION
-  void operator()(int const i) const
-  {
-    int index_1[] = {0, 0, 1, 1, 1, 2, 2, 0, 12, 12};
-    int index_2[] = {0, 1, 0, 1, 2, 1, 2, -1, 12, 13};
+  using ArborX::Details::ROPE_SENTINEL;
 
-    _results[i] = ArborX::Details::TreeConstruction::commonPrefix(
-        _fi, index_1[i], index_2[i]);
-  }
+  std::function<void(Node const *, std::ostream &)> traverseRopes;
+  traverseRopes = [&leaf_nodes, &internal_nodes, &getNodePtr,
+                   &traverseRopes](Node const *node, std::ostream &os) {
+    if (node->isLeaf())
+    {
+      os << "L" << node - leaf_nodes.data();
+      if (node->rope != ROPE_SENTINEL)
+        traverseRopes(getNodePtr(node->rope), os);
+    }
+    else
+    {
+      os << "I" << node - internal_nodes.data();
+      traverseRopes(getNodePtr(node->left_child), os);
+    }
+  };
 
-private:
-  Kokkos::View<unsigned int *, DeviceType> _fi;
-  Kokkos::View<int *, DeviceType> _results;
-};
-
-BOOST_AUTO_TEST_CASE_TEMPLATE(common_prefix, DeviceType, ARBORX_DEVICE_TYPES)
-{
-  using ExecutionSpace = typename DeviceType::execution_space;
-  int const n = 13;
-  Kokkos::View<unsigned int *, DeviceType> fi("fi", n);
-  FillFi<DeviceType> fill_fi_functor(fi);
-  Kokkos::parallel_for("fill_fi", Kokkos::RangePolicy<ExecutionSpace>(0, n),
-                       fill_fi_functor);
-
-  int const n_tests = 10;
-  Kokkos::View<int *, DeviceType> results("results", n_tests);
-
-  ComputeResults<DeviceType> compute_results_functor(fi, results);
-  Kokkos::parallel_for("compute_results",
-                       Kokkos::RangePolicy<ExecutionSpace>(0, n_tests),
-                       compute_results_functor);
-
-  auto results_host = Kokkos::create_mirror_view(results);
-  Kokkos::deep_copy(results_host, results);
-
-  auto fi_host = Kokkos::create_mirror_view(fi);
-  Kokkos::deep_copy(fi_host, fi);
-
-  BOOST_TEST(results_host[0] == 32 + 32);
-  BOOST_TEST(results_host[1] == 31);
-  BOOST_TEST(results_host[2] == 31);
-  // duplicate Morton codes
-  BOOST_TEST(fi_host[1] == 1);
-  BOOST_TEST(fi_host[1] == fi_host[2]);
-  BOOST_TEST(results_host[3] == 64);
-  BOOST_TEST(results_host[4] == 32 + 30);
-  BOOST_TEST(results_host[5] == 62);
-  BOOST_TEST(results_host[6] == 64);
-  // by definition \delta(i, j) = -1 when j \notin [0, n-1]
-  BOOST_TEST(results_host[7] == -1);
-  BOOST_TEST(results_host[8] == 64);
-  BOOST_TEST(results_host[9] == -1);
+  traverseRopes(root, sol);
 }
 
 BOOST_AUTO_TEST_CASE_TEMPLATE(example_tree_construction, DeviceType,
@@ -263,67 +238,44 @@ BOOST_AUTO_TEST_CASE_TEMPLATE(example_tree_construction, DeviceType,
     sorted_morton_codes(i) = b.to_ulong();
   }
 
-  // reference solution for a recursive traversal from top to bottom
-  // starting from root, visiting first the left child and then the right one
+  // Reference solution for the depth first search
   std::ostringstream ref;
-  ref << "I0"
-      << "I3"
-      << "I1"
-      << "L0"
-      << "L1"
-      << "I2"
-      << "L2"
-      << "L3"
-      << "I4"
-      << "L4"
-      << "I5"
-      << "I6"
-      << "L5"
-      << "L6"
-      << "L7";
-  std::cout << "ref=" << ref.str() << "\n";
+  // clang-format off
+  ref << "I0" << "I3" << "I1" << "L0" << "L1" << "I2" << "L2" << "L3"
+      << "I4" << "L4" << "I5" << "I6" << "L5" << "L6" << "L7";
+  // clang-format on
+  std::cout << "ref = " << ref.str() << "\n";
 
-  // hierarchy generation
-  using ArborX::Box;
-  using ArborX::Details::makeLeafNode;
-  using ArborX::Details::Node;
-  Kokkos::View<Node *, DeviceType> leaf_nodes("leaf_nodes", n);
-  Kokkos::View<Node *, DeviceType> internal_nodes("internal_nodes", n - 1);
-  for (int i = 0; i < n; ++i)
-    leaf_nodes(i) = makeLeafNode(i, Box{});
-  auto getNodePtr = [&leaf_nodes, &internal_nodes](int i) {
-    return i < n - 1 ? &internal_nodes(i) : &leaf_nodes(i - n + 1);
-  };
-  std::function<void(Node const *, std::ostream &)> traverseRecursive;
-  traverseRecursive = [&leaf_nodes, &internal_nodes, &traverseRecursive,
-                       &getNodePtr](Node const *node, std::ostream &os) {
-    if (node->isLeaf())
-    {
-      os << "L" << node - leaf_nodes.data();
-    }
-    else
-    {
-      os << "I" << node - internal_nodes.data();
-      for (Node const *child : {getNodePtr(node->children.first),
-                                getNodePtr(node->children.second)})
-        traverseRecursive(child, os);
-    }
-  };
+  {
+    using Node = ArborX::Details::NodeWithTwoChildren;
 
-  Kokkos::View<int *, DeviceType> parents("parents", 2 * n + 1);
-  Kokkos::deep_copy(parents, -1);
+    Kokkos::View<Node *, DeviceType> leaf_nodes("Testing::leaf_nodes", 0);
+    Kokkos::View<Node *, DeviceType> internal_nodes("Testing::internal_nodes",
+                                                    0);
+    generateHierarchy(sorted_morton_codes, leaf_nodes, internal_nodes);
 
-  typename DeviceType::execution_space space{};
-  ArborX::Details::TreeConstruction::generateHierarchy(
-      space, sorted_morton_codes, leaf_nodes, internal_nodes, parents);
+    auto const *root = internal_nodes.data();
 
-  BOOST_TEST(parents(0) == -1);
+    std::ostringstream sol;
+    traverse(leaf_nodes, internal_nodes, root, sol);
+    std::cout << "sol(node_with_two_children) = " << sol.str() << "\n";
 
-  Node const *root = internal_nodes.data();
+    BOOST_TEST(sol.str() == ref.str());
+  }
+  {
+    using Node = ArborX::Details::NodeWithLeftChildAndRope;
 
-  std::ostringstream sol;
-  traverseRecursive(root, sol);
-  std::cout << "sol=" << sol.str() << "\n";
+    Kokkos::View<Node *, DeviceType> leaf_nodes("Testing::leaf_nodes", 0);
+    Kokkos::View<Node *, DeviceType> internal_nodes("Testing::internal_nodes",
+                                                    0);
+    generateHierarchy(sorted_morton_codes, leaf_nodes, internal_nodes);
 
-  BOOST_TEST(sol.str().compare(ref.str()) == 0);
+    auto const *root = internal_nodes.data();
+
+    std::ostringstream sol;
+    traverse(leaf_nodes, internal_nodes, root, sol);
+    std::cout << "sol(node_with_left_child_and_rope) = " << sol.str() << "\n";
+
+    BOOST_TEST(sol.str() == ref.str());
+  }
 }
