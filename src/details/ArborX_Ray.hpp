@@ -54,6 +54,11 @@ struct Ray
       , _direction(direction)
   {
     normalize(_direction);
+    for (int d=0; d<3; ++d)
+    {
+        //direction can be zero
+        _invdir[d] = 1.0/(_direction[d]);
+    }
   }
 
   KOKKOS_FUNCTION
@@ -98,8 +103,15 @@ struct Ray
   KOKKOS_FUNCTION
   constexpr Point const &direction() const { return _direction; }
 
+  KOKKOS_FUNCTION
+  constexpr Point &invdir() { return _invdir; }
+
+  KOKKOS_FUNCTION
+  constexpr Point const &invdir() const { return _invdir; }
+
   Point _origin = {};
   Point _direction = {{0.f, 0.f, 0.f}};
+  Point _invdir = {{0.f, 0.f, 0.f}};
 };
 } // namespace ArborX
 

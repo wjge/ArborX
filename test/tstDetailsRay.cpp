@@ -34,6 +34,7 @@ Point operator*(Ray::Scalar a, Point p)
   return p;
 }
 
+/*old algorithm by dalg
 //KOKKOS_INLINE_FUNCTION
 bool intersects(Ray const &r, Box const &b)
 {
@@ -41,9 +42,9 @@ bool intersects(Ray const &r, Box const &b)
   //using KokkosExt::sgn;
   for (int d = 0; d < 3; ++d)
   {
-    //auto const sign = sgn(r.direction()[d]);
-    //if (sign == 0)
-    //  continue;
+    auto const sign = sgn(r.direction()[d]);
+    if (sign == 0)
+      continue;
     for (auto proj : {b.minCorner()[d], b.maxCorner()[d]})
     {
       auto dot = (proj - r.origin()[d]);
@@ -58,6 +59,38 @@ bool intersects(Ray const &r, Box const &b)
     }
   }
   return false;
+}
+*/
+
+KOKKOS_FUNCTION
+bool intersects(Ray const &r, Box const &b)
+{
+  double t0, t1, maxcomptmin, mincomptmax;
+
+  //printf("r0=%lf, r1=%lf, r2=%lf. \n",r.invdir()[0], r.invdir()[1], r.invdir()[2]);
+
+  for (int d = 0; d < 3; ++d)
+  {
+    t0 = (b.minCorner()[d]-r.origin()[d])*r.invdir()[d];
+    t1 = (b.maxCorner()[d]-r.origin()[d])*r.invdir()[d];
+
+    //printf("d=%d, t0=%lf, t1=%lf. \n", d, t0, t1);
+
+    if(d==0)
+    {
+      maxcomptmin = min(t0,t1);
+      mincomptmax = max(t0,t1);
+    }
+    else
+    {
+      maxcomptmin = max(maxcomptmin, min(t0,t1));
+      mincomptmax = min(mincomptmax, max(t0,t1));
+    }
+  }
+
+  //printf("maxcomptmin=%lf, mincomptmax=%lf. \n", maxcomptmin, mincomptmax);
+
+  return maxcomptmin <= mincomptmax;
 }
 
 } // namespace Details
