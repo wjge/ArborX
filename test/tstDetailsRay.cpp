@@ -63,34 +63,52 @@ bool intersects(Ray const &r, Box const &b)
 */
 
 KOKKOS_FUNCTION
-bool intersects(Ray const &r, Box const &b)
+bool intersects(Ray const &ray, Box const &box)
 {
-  double t0, t1, maxcomptmin, mincomptmax;
+  auto const &minCorner = box.minCorner();
+  auto const &maxCorner = box.maxCorner();
+  auto const &origin = ray.origin();
+  auto const &inv_ray_dir = ray.invdir();
 
-  //printf("r0=%lf, r1=%lf, r2=%lf. \n",r.invdir()[0], r.invdir()[1], r.invdir()[2]);
+  float max_min;
+  float min_max;
 
   for (int d = 0; d < 3; ++d)
   {
-    t0 = (b.minCorner()[d]-r.origin()[d])*r.invdir()[d];
-    t1 = (b.maxCorner()[d]-r.origin()[d])*r.invdir()[d];
-
-    //printf("d=%d, t0=%lf, t1=%lf. \n", d, t0, t1);
-
-    if(d==0)
+    float tmin, tmax;
+    // Still not sure how robust this is, as it deals with nan and inf. For
+    // example, replacing if() with
+    //
+    //     t0 = (minCorner[d] - origin[d]) * inv_ray_dir[d];
+    //     t1 = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
+    //     tmin = min(t0, t1);
+    //     tmax = max(t0, t1);
+    //
+    // does not work.
+    if (inv_ray_dir[d] >= 0)
     {
-      maxcomptmin = min(t0,t1);
-      mincomptmax = max(t0,t1);
+      tmin = (minCorner[d] - origin[d]) * inv_ray_dir[d];
+      tmax = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
     }
     else
     {
-      maxcomptmin = max(maxcomptmin, min(t0,t1));
-      mincomptmax = min(mincomptmax, max(t0,t1));
+      tmin = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
+      tmax = (minCorner[d] - origin[d]) * inv_ray_dir[d];
+    }
+
+    if (d == 0)
+    {
+      max_min = tmin;
+      min_max = tmax;
+    }
+    else
+    {
+      max_min = max(max_min, tmin);
+      min_max = min(min_max, tmax);
     }
   }
 
-  //printf("maxcomptmin=%lf, mincomptmax=%lf. \n", maxcomptmin, mincomptmax);
-
-  return maxcomptmin <= mincomptmax;
+  return max_min <= min_max && (min_max >= 0);
 }
 
 } // namespace Details
