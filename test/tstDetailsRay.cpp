@@ -17,109 +17,12 @@
 
 #define BOOST_TEST_MODULE DetailsRay
 
-namespace ArborX
-{
-namespace Details
-{
-Point &operator+=(Point &rhs, Point const &lhs)
-{
-  for (int d = 0; d < 3; ++d)
-    rhs[d] += lhs[d];
-  return rhs;
-}
-Point operator*(Ray::Scalar a, Point p)
-{
-  for (int d = 0; d < 3; ++d)
-    p[d] *= a;
-  return p;
-}
-
-/*old algorithm by dalg
-//KOKKOS_INLINE_FUNCTION
-bool intersects(Ray const &r, Box const &b)
-{
-  using KokkosExt::min;
-  //using KokkosExt::sgn;
-  for (int d = 0; d < 3; ++d)
-  {
-    auto const sign = sgn(r.direction()[d]);
-    if (sign == 0)
-      continue;
-    for (auto proj : {b.minCorner()[d], b.maxCorner()[d]})
-    {
-      auto dot = (proj - r.origin()[d]);
-      dot *= r.direction()[d];
-      if (dot < 0)
-        continue;
-      auto test{r.origin()};
-      test += dot * r.direction();
-      test[d] = proj;
-      if (intersects(test, b))
-        return true;
-    }
-  }
-  return false;
-}
-*/
-
-KOKKOS_FUNCTION
-bool intersects(Ray const &ray, Box const &box)
-{
-  auto const &minCorner = box.minCorner();
-  auto const &maxCorner = box.maxCorner();
-  auto const &origin = ray.origin();
-  auto const &inv_ray_dir = ray.invdir();
-
-  float max_min;
-  float min_max;
-
-  for (int d = 0; d < 3; ++d)
-  {
-    float tmin, tmax;
-    // Still not sure how robust this is, as it deals with nan and inf. For
-    // example, replacing if() with
-    //
-    //     t0 = (minCorner[d] - origin[d]) * inv_ray_dir[d];
-    //     t1 = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
-    //     tmin = min(t0, t1);
-    //     tmax = max(t0, t1);
-    //
-    // does not work.
-    if (inv_ray_dir[d] >= 0)
-    {
-      tmin = (minCorner[d] - origin[d]) * inv_ray_dir[d];
-      tmax = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
-    }
-    else
-    {
-      tmin = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
-      tmax = (minCorner[d] - origin[d]) * inv_ray_dir[d];
-    }
-
-    if (d == 0)
-    {
-      max_min = tmin;
-      min_max = tmax;
-    }
-    else
-    {
-      max_min = max(max_min, tmin);
-      min_max = min(min_max, tmax);
-    }
-  }
-
-  return max_min <= min_max && (min_max >= 0);
-}
-
-} // namespace Details
-} // namespace ArborX
-
 BOOST_AUTO_TEST_CASE(intersects_box)
 {
   using ArborX::Box;
   using ArborX::Point;
   using ArborX::Ray;
-  using ArborX::Details::intersects;
+  auto &intersects = ArborX::Ray::intersects;
 
   Box unit_box1{{0, 0, 0}, {1, 1, 1}};
   Box unit_box2{{-1, -1, -1}, {0, 0, 0}};
