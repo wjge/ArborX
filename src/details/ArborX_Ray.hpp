@@ -112,63 +112,71 @@ struct Ray
   Point _origin = {};
   Point _direction = {{0.f, 0.f, 0.f}};
   Point _invdir = {{0.f, 0.f, 0.f}};
+};
 
-  // The ray-box intersection algorithm is based on Majercik, A., et al. 2018.
-  // Their 'efficient slag' algorithm checks the intersections both in front and
-  // behind the ray. The function here checks the intersections in front of the
-  // ray. The potential issue is the division of zero, when _direction[d] is
-  // zero. The IEEE standard guarantees the algorithm works for the
-  // infinities, which is discussed in more detail in Williams, A., et al. 2005
-  // and the website (key word: A minimal ray-tracer: rendering simple shapes).
-  KOKKOS_FUNCTION
-  static bool intersects(Ray const &ray, Box const &box)
+namespace Details
+{
+namespace RayTracing
+{
+// ray-box intersection
+// The ray-box intersection algorithm is based on Majercik, A., et al. 2018.
+// Their 'efficient slag' algorithm checks the intersections both in front and
+// behind the ray. The function here checks the intersections in front of the
+// ray. The potential issue is the division of zero, when _direction[d] is
+// zero. The IEEE standard guarantees the algorithm works for the
+// infinities, which is discussed in more detail in Williams, A., et al. 2005
+// and the website (key word: A minimal ray-tracer: rendering simple shapes).
+KOKKOS_INLINE_FUNCTION
+static bool intersects(Ray const &ray, Box const &box)
+{
+  auto const &minCorner = box.minCorner();
+  auto const &maxCorner = box.maxCorner();
+  auto const &origin = ray.origin();
+  auto const &inv_ray_dir = ray.invdir();
+
+  float max_min;
+  float min_max;
+
+  for (int d = 0; d < 3; ++d)
   {
-    auto const &minCorner = box.minCorner();
-    auto const &maxCorner = box.maxCorner();
-    auto const &origin = ray.origin();
-    auto const &inv_ray_dir = ray.invdir();
-
-    float max_min;
-    float min_max;
-
-    for (int d = 0; d < 3; ++d)
+    float tmin, tmax;
+    // Still not sure how robust this is, as it deals with nan and inf. For
+    // example, replacing if() with
+    //
+    //     t0 = (minCorner[d] - origin[d]) * inv_ray_dir[d];
+    //     t1 = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
+    //     tmin = min(t0, t1);
+    //     tmax = max(t0, t1);
+    //
+    // does not work.
+    if (inv_ray_dir[d] >= 0)
     {
-      float tmin, tmax;
-      // Still not sure how robust this is, as it deals with nan and inf. For
-      // example, replacing if() with
-      //
-      //     t0 = (minCorner[d] - origin[d]) * inv_ray_dir[d];
-      //     t1 = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
-      //     tmin = min(t0, t1);
-      //     tmax = max(t0, t1);
-      //
-      // does not work.
-      if (inv_ray_dir[d] >= 0)
-      {
-        tmin = (minCorner[d] - origin[d]) * inv_ray_dir[d];
-        tmax = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
-      }
-      else
-      {
-        tmin = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
-        tmax = (minCorner[d] - origin[d]) * inv_ray_dir[d];
-      }
-
-      if (d == 0)
-      {
-        max_min = tmin;
-        min_max = tmax;
-      }
-      else
-      {
-        max_min = max(max_min, tmin);
-        min_max = min(min_max, tmax);
-      }
+      tmin = (minCorner[d] - origin[d]) * inv_ray_dir[d];
+      tmax = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
+    }
+    else
+    {
+      tmin = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
+      tmax = (minCorner[d] - origin[d]) * inv_ray_dir[d];
     }
 
-    return max_min <= min_max && (min_max >= 0);
+    if (d == 0)
+    {
+      max_min = tmin;
+      min_max = tmax;
+    }
+    else
+    {
+      max_min = max(max_min, tmin);
+      min_max = min(min_max, tmax);
+    }
   }
-};
+
+  return max_min <= min_max && (min_max >= 0);
+}
+} // namespace RayTracing
+} // namespace Details
+
 } // namespace ArborX
 
 #endif

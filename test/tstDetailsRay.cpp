@@ -10,7 +10,6 @@
  ****************************************************************************/
 #include <ArborX_Box.hpp>
 #include <ArborX_DetailsAlgorithms.hpp>
-#include <ArborX_DetailsKokkosExt.hpp> // sgn
 #include <ArborX_Ray.hpp>
 
 #include <boost/test/unit_test.hpp>
@@ -22,7 +21,7 @@ BOOST_AUTO_TEST_CASE(intersects_box)
   using ArborX::Box;
   using ArborX::Point;
   using ArborX::Ray;
-  auto &intersects = ArborX::Ray::intersects;
+  constexpr auto &intersects = ArborX::Details::RayTracing::intersects;
 
   Box unit_box1{{0, 0, 0}, {1, 1, 1}};
   Box unit_box2{{-1, -1, -1}, {0, 0, 0}};
