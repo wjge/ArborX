@@ -12,6 +12,7 @@
 #define ARBORX_RAY_HPP
 
 #include <ArborX_Box.hpp>
+#include <ArborX_DetailsKokkosExt.hpp>
 #include <ArborX_Point.hpp>
 
 #include <Kokkos_Macros.hpp>
@@ -26,24 +27,6 @@ struct Ray
   using Vector = Point; // will regret this later
 
   using Scalar = std::decay_t<decltype(std::declval<Vector>()[0])>;
-
-  class Normalized
-  {
-    Vector v_;
-
-  public:
-    KOKKOS_FUNCTION
-    explicit Normalized(Vector const &v)
-        : v_{v}
-    {
-    }
-
-    KOKKOS_FUNCTION
-    operator Vector &() { return v_; }
-
-    KOKKOS_FUNCTION
-    operator Vector const &() const { return v_; }
-  };
 
   KOKKOS_DEFAULTED_FUNCTION
   constexpr Ray() = default;
@@ -62,25 +45,12 @@ struct Ray
   }
 
   KOKKOS_FUNCTION
-  Ray(Point const &origin, Normalized const &direction)
-      : _origin(origin)
-      , _direction(direction)
-  {
-  }
-
-  KOKKOS_FUNCTION
-  static constexpr Scalar norm_sq(Vector const &v)
+  static Scalar norm(Vector const &v)
   {
     Scalar sq{};
     for (int d = 0; d < 3; ++d)
       sq += v[d] * v[d];
-    return sq;
-  }
-
-  KOKKOS_FUNCTION
-  static constexpr Scalar norm(Vector const &v)
-  {
-    return std::sqrt(norm_sq(v));
+    return std::sqrt(sq);
   }
 
   KOKKOS_FUNCTION static void normalize(Vector &v)
@@ -98,27 +68,26 @@ struct Ray
   constexpr Point const &origin() const { return _origin; }
 
   KOKKOS_FUNCTION
-  constexpr Point &direction() { return _direction; }
+  constexpr Vector &direction() { return _direction; }
 
   KOKKOS_FUNCTION
-  constexpr Point const &direction() const { return _direction; }
+  constexpr Vector const &direction() const { return _direction; }
 
   KOKKOS_FUNCTION
-  constexpr Point &invdir() { return _invdir; }
+  constexpr Vector &invdir() { return _invdir; }
 
   KOKKOS_FUNCTION
-  constexpr Point const &invdir() const { return _invdir; }
+  constexpr Vector const &invdir() const { return _invdir; }
 
   Point _origin = {};
-  Point _direction = {{0.f, 0.f, 0.f}};
-  Point _invdir = {{0.f, 0.f, 0.f}};
+  Vector _direction = {{0.f, 0.f, 0.f}};
+  Vector _invdir = {{0.f, 0.f, 0.f}};
 };
 
 namespace Details
 {
 namespace RayTracing
 {
-// ray-box intersection
 // The ray-box intersection algorithm is based on Majercik, A., et al. 2018.
 // Their 'efficient slag' algorithm checks the intersections both in front and
 // behind the ray. The function here checks the intersections in front of the
@@ -139,7 +108,8 @@ static bool intersects(Ray const &ray, Box const &box)
 
   for (int d = 0; d < 3; ++d)
   {
-    float tmin, tmax;
+    float tmin;
+    float tmax;
     // Still not sure how robust this is, as it deals with nan and inf. For
     // example, replacing if() with
     //
@@ -167,8 +137,14 @@ static bool intersects(Ray const &ray, Box const &box)
     }
     else
     {
-      max_min = max(max_min, tmin);
-      min_max = min(min_max, tmax);
+      // max_min = max(max_min, tmin);
+      // min_max = min(min_max, tmax);
+      // max_min = KokkosExt::max(max_min, tmin);
+      // min_max = KokkosExt::min(min_max, tmax);
+      if (max_min < tmin)
+        max_min = tmin;
+      if (min_max > tmax)
+        min_max = tmax;
     }
   }
 

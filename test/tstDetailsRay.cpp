@@ -9,7 +9,6 @@
  * SPDX-License-Identifier: BSD-3-Clause                                    *
  ****************************************************************************/
 #include <ArborX_Box.hpp>
-#include <ArborX_DetailsAlgorithms.hpp>
 #include <ArborX_Ray.hpp>
 
 #include <boost/test/unit_test.hpp>
