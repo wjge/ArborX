@@ -95,12 +95,12 @@ BOOST_AUTO_TEST_CASE(intersects_box)
   BOOST_TEST(!intersects(Ray{{-.5, -.5, 1}, {0, 0, 1}}, unit_box2));
 
   // hit the center of an edge
-  BOOST_TEST(intersects(Ray{{.5, .5, -1}, {-1, -1, 0}}, unit_box2));
-  BOOST_TEST(!intersects(Ray{{.5, .5, -1}, {1, 1, 0}}, unit_box2));
-  BOOST_TEST(intersects(Ray{{.5, -1, .5}, {-1, 0, -1}}, unit_box2));
-  BOOST_TEST(!intersects(Ray{{.5, -1, .5}, {1, 0, 1}}, unit_box2));
-  BOOST_TEST(intersects(Ray{{-1, .5, .5}, {0, -1, -1}}, unit_box2));
-  BOOST_TEST(!intersects(Ray{{-1, .5, .5}, {0, 1, 1}}, unit_box2));
+  BOOST_TEST(intersects(Ray{{.5, .5, -.5}, {-1, -1, 0}}, unit_box2));
+  BOOST_TEST(!intersects(Ray{{.5, .5, -.5}, {1, 1, 0}}, unit_box2));
+  BOOST_TEST(intersects(Ray{{.5, -.5, .5}, {-1, 0, -1}}, unit_box2));
+  BOOST_TEST(!intersects(Ray{{.5, -.5, .5}, {1, 0, 1}}, unit_box2));
+  BOOST_TEST(intersects(Ray{{-.5, .5, .5}, {0, -1, -1}}, unit_box2));
+  BOOST_TEST(!intersects(Ray{{-.5, .5, .5}, {0, 1, 1}}, unit_box2));
 
   // hit a corner
   BOOST_TEST(intersects(Ray{{.5, .5, .5}, {-1, -1, -1}}, unit_box2));
