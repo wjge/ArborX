@@ -95,6 +95,10 @@ namespace RayTracing
 // zero. The IEEE standard guarantees the algorithm works for the
 // infinities, which is discussed in more detail in Williams, A., et al. 2005
 // and the website (key word: A minimal ray-tracer: rendering simple shapes).
+//
+// NaN values will appear when minCorner[d] or maxCorner[d] == origin[d] and
+// inv_ray_dir[d]==inf or -inf. The current implementation assumes any
+// comparison "> <" with NaN returns false.
 KOKKOS_INLINE_FUNCTION
 static bool intersects(Ray const &ray, Box const &box)
 {
@@ -137,8 +141,6 @@ static bool intersects(Ray const &ray, Box const &box)
     }
     else
     {
-      // max_min = max(max_min, tmin);
-      // min_max = min(min_max, tmax);
       // max_min = KokkosExt::max(max_min, tmin);
       // min_max = KokkosExt::min(min_max, tmax);
       if (max_min < tmin)
@@ -148,7 +150,7 @@ static bool intersects(Ray const &ray, Box const &box)
     }
   }
 
-  return max_min <= min_max && (min_max >= 0);
+  return max_min <= min_max && (min_max > 0);
 }
 } // namespace RayTracing
 } // namespace Details
