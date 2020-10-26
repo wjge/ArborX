@@ -55,10 +55,10 @@ struct Ray
 
   KOKKOS_FUNCTION static void normalize(Vector &v)
   {
-    auto const n = norm(v);
-    assert(n > 0);
+    auto const magv = norm(v);
+    assert(magv > 0);
     for (int d = 0; d < 3; ++d)
-      v[d] /= n;
+      v[d] /= magv;
   }
 
   KOKKOS_FUNCTION
@@ -85,8 +85,6 @@ struct Ray
 };
 
 namespace Details
-{
-namespace RayTracing
 {
 // The ray-box intersection algorithm is based on Majercik, A., et al. 2018.
 // Their 'efficient slag' algorithm checks the intersections both in front and
@@ -150,9 +148,8 @@ static bool intersects(Ray const &ray, Box const &box)
     }
   }
 
-  return max_min <= min_max && (min_max > 0);
+  return max_min <= min_max && (min_max >= 0);
 }
-} // namespace RayTracing
 } // namespace Details
 
 } // namespace ArborX
