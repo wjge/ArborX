@@ -85,17 +85,32 @@ struct Ray
 
 namespace Details
 {
-// The ray-box intersection algorithm is based on Majercik, A., et al. 2018.
-// Their 'efficient slag' algorithm checks the intersections both in front and
-// behind the ray. The algorithm here checks the intersections in front of the
-// ray. Another reference is from Williams, A., et al. 2005
-// and the website (key word: A minimal ray-tracer: rendering simple shapes).
+// The ray-box intersection algorithm is based on [1]. Their 'efficient slag'
+// algorithm checks the intersections both in front and behind the ray. The
+// function here checks the intersections in front of the ray.
 //
-// The NaN values will appear when minCorner[d] or maxCorner[d] == origin[d] and
-// inv_ray_dir[d]==inf or -inf. The algorithm here adds an extra check for the
-// NaN values to make it more robust. The compiler needs to follow the IEEE
-// standard.
+// There are few issues here. First, when a ray direction is aligned with one
+// of the axis, a division by zero will occur. This is fine, as usually it
+// results in +inf or -inf, which are treated correctly. However, it also leads
+// to the second situation, when it is 0/0 which occurs when the ray's origin
+// in that dimension is on the same plane as one of the corners (i.e., if
+// inv_ray_dir[d] == 0 && (minCorner[d] == origin[d] || maxCorner[d] ==
+// origin[d])). This leads to NaN, which are not treated correctly (unless, as
+// in [1], the underlying min/max functions are able to ignore them). The issue
+// is discussed in more details in [2] and the webiste (key word: A minimal
+// ray-tracer: rendering simple shapes).
 //
+// In the algorithm below, we explicitly ignoring NaN values, leading to
+// correct algorithm. An interesting side note is that per IEEE standard, all
+// comparisons with NaN are false.
+//
+// [1] Majercik, A., Crassin, C., Shirley, P., & McGuire, M. (2018). A ray-box
+// intersection algorithm and efficient dynamic voxel rendering. Journal of
+// Computer Graphics Techniques Vol, 7(3).
+//
+// [2] Williams, A., Barrus, S., Morley, R. K., & Shirley, P. (2005). An
+// efficient and robust ray-box intersection algorithm. In ACM SIGGRAPH 2005
+// Courses (pp. 9-es).
 KOKKOS_INLINE_FUNCTION
 bool intersects(Ray const &ray, Box const &box)
 {
@@ -104,16 +119,14 @@ bool intersects(Ray const &ray, Box const &box)
   auto const &origin = ray.origin();
   auto const &inv_ray_dir = ray.invdir();
 
-  float max_min;
-  float min_max;
-
-  int init = 0;
+  constexpr float inf = KokkosExt::ArithmeticTraits::infinity<float>::value;
+  float max_min = -inf;
+  float min_max = inf;
 
   for (int d = 0; d < 3; ++d)
   {
     float tmin;
     float tmax;
-
     if (inv_ray_dir[d] >= 0)
     {
       tmin = (minCorner[d] - origin[d]) * inv_ray_dir[d];
@@ -125,25 +138,16 @@ bool intersects(Ray const &ray, Box const &box)
       tmax = (minCorner[d] - origin[d]) * inv_ray_dir[d];
     }
 
-    if (d == init)
-    {
-      if (tmin == tmin && tmax == tmax)
-      {
-        max_min = tmin;
-        min_max = tmax;
-      }
-      else
-      {
-        init = d + 1;
-        continue;
-      }
-    }
-    else
-    {
-      max_min = max_min < tmin ? tmin : max_min;
-      min_max = min_max > tmax ? tmax : min_max;
-    }
+    if (!std::isnan(tmin) && max_min < tmin)
+      max_min = tmin;
+    if (!std::isnan(tmax) && min_max > tmax)
+      min_max = tmax;
   }
+
+  // Silence warnings about possibly uninitialized
+  (void)max_min;
+  (void)min_max;
+
   return max_min <= min_max && (min_max >= 0);
 }
 
