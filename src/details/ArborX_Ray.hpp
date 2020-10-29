@@ -87,88 +87,15 @@ namespace Details
 {
 // The ray-box intersection algorithm is based on Majercik, A., et al. 2018.
 // Their 'efficient slag' algorithm checks the intersections both in front and
-// behind the ray. The function here checks the intersections in front of the
-// ray. The potential issue is the division of zero, when _direction[d] is
-// zero. The IEEE standard guarantees the algorithm works for the
-// infinities, which is discussed in more detail in Williams, A., et al. 2005
+// behind the ray. The algorithm here checks the intersections in front of the
+// ray. Another reference is from Williams, A., et al. 2005
 // and the website (key word: A minimal ray-tracer: rendering simple shapes).
 //
-// NaN values will appear when minCorner[d] or maxCorner[d] == origin[d] and
-// inv_ray_dir[d]==inf or -inf. The current implementation assumes any
-// comparison "> <" with NaN returns false.
-/*KOKKOS_INLINE_FUNCTION
-bool intersects(Ray const &ray, Box const &box)
-{
-  auto const &minCorner = box.minCorner();
-  auto const &maxCorner = box.maxCorner();
-  auto const &origin = ray.origin();
-  auto const &inv_ray_dir = ray.invdir();
-
-  float tmin;
-  float tmax;
-  float tymin;
-  float tymax;
-  float tzmin;
-  float tzmax;
-
-  if (inv_ray_dir[0] < 0)
-  {
-    tmin = (maxCorner[0] - origin[0]) * inv_ray_dir[0];
-    tmax = (minCorner[0] - origin[0]) * inv_ray_dir[0];
-  }
-  {
-    tmin = (minCorner[0] - origin[0]) * inv_ray_dir[0];
-    tmax = (maxCorner[0] - origin[0]) * inv_ray_dir[0];
-  }
-
-  if (inv_ray_dir[1] < 0)
-  {
-    tymin = (maxCorner[1] - origin[1]) * inv_ray_dir[1];
-    tymax = (minCorner[1] - origin[1]) * inv_ray_dir[1];
-  }
-  {
-    tymin = (minCorner[1] - origin[1]) * inv_ray_dir[1];
-    tymax = (maxCorner[1] - origin[1]) * inv_ray_dir[1];
-  }
-
-  if ((tmin > tymax) || (tymin > tmax))
-    return false;
-
-  if (tymin > tmin)
-    tmin = tymin;
-  if (tymax < tmax)
-    tmax = tymax;
-
-  if (inv_ray_dir[2] < 0)
-  {
-    tzmin = (maxCorner[2] - origin[2]) * inv_ray_dir[2];
-    tzmax = (minCorner[2] - origin[2]) * inv_ray_dir[2];
-  }
-  {
-    tzmin = (minCorner[2] - origin[2]) * inv_ray_dir[2];
-    tzmax = (maxCorner[2] - origin[2]) * inv_ray_dir[2];
-  }
-
-  if ((tmin > tzmax) || (tzmin > tmax))
-    return false;
-
-  if (tzmin > tmin)
-    tmin = tzmin;
-  if (tzmax < tmax)
-    tmax = tzmax;
-
-  float t = tmin;
-
-  if (t < 0)
-  {
-    t = tmax;
-    if (t < 0)
-      return false;
-  }
-
-  return true;
-}*/
-
+// The NaN values will appear when minCorner[d] or maxCorner[d] == origin[d] and
+// inv_ray_dir[d]==inf or -inf. The algorithm here adds an extra check for the
+// NaN values to make it more robust. The compiler needs to follow the IEEE
+// standard.
+//
 KOKKOS_INLINE_FUNCTION
 bool intersects(Ray const &ray, Box const &box)
 {
@@ -186,15 +113,6 @@ bool intersects(Ray const &ray, Box const &box)
   {
     float tmin;
     float tmax;
-    // Still not sure how robust this is, as it deals with nan and inf. For
-    // example, replacing if() with
-    //
-    //     t0 = (minCorner[d] - origin[d]) * inv_ray_dir[d];
-    //     t1 = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
-    //     tmin = min(t0, t1);
-    //     tmax = max(t0, t1);
-    //
-    // does not work.
 
     if (inv_ray_dir[d] >= 0)
     {
@@ -222,12 +140,8 @@ bool intersects(Ray const &ray, Box const &box)
     }
     else
     {
-      // max_min = KokkosExt::max(max_min, tmin);
-      // min_max = KokkosExt::min(min_max, tmax);
-      if (max_min < tmin)
-        max_min = tmin;
-      if (min_max > tmax)
-        min_max = tmax;
+      max_min = max_min < tmin ? tmin : max_min;
+      min_max = min_max > tmax ? tmax : min_max;
     }
   }
   return max_min <= min_max && (min_max >= 0);

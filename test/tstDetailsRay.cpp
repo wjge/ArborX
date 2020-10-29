@@ -166,4 +166,13 @@ BOOST_AUTO_TEST_CASE(intersects_box)
   BOOST_TEST(intersects(Ray{{1.5, 1, 1}, {-1, -2, 0}}, unit_box));
   BOOST_TEST(!intersects(Ray{{1.5, 1, 1}, {-1, 0, -2.1}}, unit_box));
   BOOST_TEST(!intersects(Ray{{1.5, 1, 1}, {-1, -2.1, 0}}, unit_box));
+
+  BOOST_TEST(intersects(Ray{{0, 1.5, 0}, {0, -1, 2}}, unit_box));
+  BOOST_TEST(intersects(Ray{{0, 1.5, 0}, {2, -1, 0}}, unit_box));
+  BOOST_TEST(!intersects(Ray{{0, 1.5, 0}, {0, -1, 2.1}}, unit_box));
+  BOOST_TEST(!intersects(Ray{{0, 1.5, 0}, {2.1, -1, 0}}, unit_box));
+  BOOST_TEST(intersects(Ray{{1, 1.5, 1}, {0, -1, -2}}, unit_box));
+  BOOST_TEST(intersects(Ray{{1, 1.5, 1}, {-2, -1, 0}}, unit_box));
+  BOOST_TEST(!intersects(Ray{{1, 1.5, 1}, {0, -1, -2.1}}, unit_box));
+  BOOST_TEST(!intersects(Ray{{1, 1.5, 1}, {-2.1, -1, 0}}, unit_box));
 }
