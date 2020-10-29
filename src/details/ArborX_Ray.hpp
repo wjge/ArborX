@@ -39,8 +39,7 @@ struct Ray
     normalize(_direction);
     for (int d = 0; d < 3; ++d)
     {
-      // direction can be zero
-      _invdir[d] = 1.0 / (_direction[d]);
+      _invdir[d] = 1.0 / _direction[d];
     }
   }
 
@@ -97,8 +96,81 @@ namespace Details
 // NaN values will appear when minCorner[d] or maxCorner[d] == origin[d] and
 // inv_ray_dir[d]==inf or -inf. The current implementation assumes any
 // comparison "> <" with NaN returns false.
+/*KOKKOS_INLINE_FUNCTION
+bool intersects(Ray const &ray, Box const &box)
+{
+  auto const &minCorner = box.minCorner();
+  auto const &maxCorner = box.maxCorner();
+  auto const &origin = ray.origin();
+  auto const &inv_ray_dir = ray.invdir();
+
+  float tmin;
+  float tmax;
+  float tymin;
+  float tymax;
+  float tzmin;
+  float tzmax;
+
+  if (inv_ray_dir[0] < 0)
+  {
+    tmin = (maxCorner[0] - origin[0]) * inv_ray_dir[0];
+    tmax = (minCorner[0] - origin[0]) * inv_ray_dir[0];
+  }
+  {
+    tmin = (minCorner[0] - origin[0]) * inv_ray_dir[0];
+    tmax = (maxCorner[0] - origin[0]) * inv_ray_dir[0];
+  }
+
+  if (inv_ray_dir[1] < 0)
+  {
+    tymin = (maxCorner[1] - origin[1]) * inv_ray_dir[1];
+    tymax = (minCorner[1] - origin[1]) * inv_ray_dir[1];
+  }
+  {
+    tymin = (minCorner[1] - origin[1]) * inv_ray_dir[1];
+    tymax = (maxCorner[1] - origin[1]) * inv_ray_dir[1];
+  }
+
+  if ((tmin > tymax) || (tymin > tmax))
+    return false;
+
+  if (tymin > tmin)
+    tmin = tymin;
+  if (tymax < tmax)
+    tmax = tymax;
+
+  if (inv_ray_dir[2] < 0)
+  {
+    tzmin = (maxCorner[2] - origin[2]) * inv_ray_dir[2];
+    tzmax = (minCorner[2] - origin[2]) * inv_ray_dir[2];
+  }
+  {
+    tzmin = (minCorner[2] - origin[2]) * inv_ray_dir[2];
+    tzmax = (maxCorner[2] - origin[2]) * inv_ray_dir[2];
+  }
+
+  if ((tmin > tzmax) || (tzmin > tmax))
+    return false;
+
+  if (tzmin > tmin)
+    tmin = tzmin;
+  if (tzmax < tmax)
+    tmax = tzmax;
+
+  float t = tmin;
+
+  if (t < 0)
+  {
+    t = tmax;
+    if (t < 0)
+      return false;
+  }
+
+  return true;
+}*/
+
 KOKKOS_INLINE_FUNCTION
-static bool intersects(Ray const &ray, Box const &box)
+bool intersects(Ray const &ray, Box const &box)
 {
   auto const &minCorner = box.minCorner();
   auto const &maxCorner = box.maxCorner();
@@ -107,6 +179,8 @@ static bool intersects(Ray const &ray, Box const &box)
 
   float max_min;
   float min_max;
+
+  int init = 0;
 
   for (int d = 0; d < 3; ++d)
   {
@@ -121,6 +195,7 @@ static bool intersects(Ray const &ray, Box const &box)
     //     tmax = max(t0, t1);
     //
     // does not work.
+
     if (inv_ray_dir[d] >= 0)
     {
       tmin = (minCorner[d] - origin[d]) * inv_ray_dir[d];
@@ -132,10 +207,18 @@ static bool intersects(Ray const &ray, Box const &box)
       tmax = (minCorner[d] - origin[d]) * inv_ray_dir[d];
     }
 
-    if (d == 0)
+    if (d == init)
     {
-      max_min = tmin;
-      min_max = tmax;
+      if (tmin == tmin && tmax == tmax)
+      {
+        max_min = tmin;
+        min_max = tmax;
+      }
+      else
+      {
+        init = d + 1;
+        continue;
+      }
     }
     else
     {
@@ -147,11 +230,9 @@ static bool intersects(Ray const &ray, Box const &box)
         min_max = tmax;
     }
   }
-
   return max_min <= min_max && (min_max >= 0);
 }
+
 } // namespace Details
-
 } // namespace ArborX
-
 #endif
