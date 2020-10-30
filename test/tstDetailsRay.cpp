@@ -15,24 +15,6 @@
 
 #define BOOST_TEST_MODULE DetailsRay
 
-BOOST_AUTO_TEST_CASE(ieee)
-{
-  float pinf = 1.0 / 0.0;
-  float ninf = -1.0 / 0.0;
-  float zerotimespinf = 0 * pinf;
-  float zerotimesninf = 0 * ninf;
-  BOOST_TEST_WARN(!(zerotimespinf == zerotimespinf));
-  BOOST_TEST_WARN(!(zerotimesninf == zerotimesninf));
-  BOOST_TEST_WARN(!(ninf < zerotimespinf));
-  BOOST_TEST_WARN(!(pinf < zerotimespinf));
-  BOOST_TEST_WARN(!(ninf > zerotimesninf));
-  BOOST_TEST_WARN(!(pinf > zerotimesninf));
-  BOOST_TEST_WARN(!(1.0 < zerotimespinf));
-  BOOST_TEST_WARN(!(1.0 > zerotimespinf));
-  BOOST_TEST_WARN(!(-1.0 > zerotimesninf));
-  BOOST_TEST_WARN(!(-1.0 > zerotimesninf));
-}
-
 BOOST_AUTO_TEST_CASE(intersects_box)
 {
   using ArborX::Box;

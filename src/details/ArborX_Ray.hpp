@@ -37,10 +37,6 @@ struct Ray
       , _direction(direction)
   {
     normalize(_direction);
-    for (int d = 0; d < 3; ++d)
-    {
-      _invdir[d] = 1.0 / _direction[d];
-    }
   }
 
   KOKKOS_FUNCTION
@@ -72,15 +68,8 @@ struct Ray
   KOKKOS_FUNCTION
   constexpr Vector const &direction() const { return _direction; }
 
-  KOKKOS_FUNCTION
-  constexpr Vector &invdir() { return _invdir; }
-
-  KOKKOS_FUNCTION
-  constexpr Vector const &invdir() const { return _invdir; }
-
   Point _origin = {};
   Vector _direction = {{0.f, 0.f, 0.f}};
-  Vector _invdir = {{0.f, 0.f, 0.f}};
 };
 
 namespace Details
@@ -117,9 +106,9 @@ bool intersects(Ray const &ray, Box const &box)
   auto const &minCorner = box.minCorner();
   auto const &maxCorner = box.maxCorner();
   auto const &origin = ray.origin();
-  auto const &inv_ray_dir = ray.invdir();
+  auto const &direction = ray.direction();
 
-  constexpr float inf = KokkosExt::ArithmeticTraits::infinity<float>::value;
+  auto const inf = KokkosExt::ArithmeticTraits::infinity<float>::value;
   float max_min = -inf;
   float min_max = inf;
 
@@ -127,15 +116,15 @@ bool intersects(Ray const &ray, Box const &box)
   {
     float tmin;
     float tmax;
-    if (inv_ray_dir[d] >= 0)
+    if (direction[d] >= 0)
     {
-      tmin = (minCorner[d] - origin[d]) * inv_ray_dir[d];
-      tmax = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
+      tmin = (minCorner[d] - origin[d]) / direction[d];
+      tmax = (maxCorner[d] - origin[d]) / direction[d];
     }
     else
     {
-      tmin = (maxCorner[d] - origin[d]) * inv_ray_dir[d];
-      tmax = (minCorner[d] - origin[d]) * inv_ray_dir[d];
+      tmin = (maxCorner[d] - origin[d]) / direction[d];
+      tmax = (minCorner[d] - origin[d]) / direction[d];
     }
 
     if (!std::isnan(tmin) && max_min < tmin)
@@ -143,10 +132,6 @@ bool intersects(Ray const &ray, Box const &box)
     if (!std::isnan(tmax) && min_max > tmax)
       min_max = tmax;
   }
-
-  // Silence warnings about possibly uninitialized
-  (void)max_min;
-  (void)min_max;
 
   return max_min <= min_max && (min_max >= 0);
 }
