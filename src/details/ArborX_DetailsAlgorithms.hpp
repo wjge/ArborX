@@ -15,6 +15,7 @@
 #include <ArborX_DetailsKokkosExt.hpp> // min, max, isFinite
 #include <ArborX_Point.hpp>
 #include <ArborX_Sphere.hpp>
+#include <ArborX_Ray.hpp>
 
 #include <Kokkos_Macros.hpp>
 
@@ -207,6 +208,9 @@ Point returnCentroid(Box const &box)
 
 KOKKOS_INLINE_FUNCTION
 Point returnCentroid(Sphere const &sphere) { return sphere.centroid(); }
+
+KOKKOS_INLINE_FUNCTION
+Point returnCentroid(Ray const &ray) { return ray.origin(); }
 
 // transformation that maps the unit cube into a new axis-aligned box
 // NOTE safe to perform in-place
