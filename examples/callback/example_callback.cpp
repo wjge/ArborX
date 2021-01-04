@@ -53,31 +53,16 @@ struct AccessTraits<NearestToOrigin, PredicatesTag>
 };
 } // namespace ArborX
 
-struct PairIndexDistance
-{
-  int index;
-  float distance;
-};
-
 struct PrintfCallback
 {
   template <typename Predicate, typename OutputFunctor>
   KOKKOS_FUNCTION void operator()(Predicate, int primitive,
                                   OutputFunctor const &out) const
   {
-#ifndef KOKKOS_ENABLE_SYCL
+#ifndef __SYCL_DEVICE_ONLY__
     printf("Found %d from functor\n", primitive);
 #endif
     out(primitive);
-  }
-  template <typename Predicate, typename OutputFunctor>
-  KOKKOS_FUNCTION void operator()(Predicate, int primitive, float distance,
-                                  OutputFunctor const &out) const
-  {
-#ifndef KOKKOS_ENABLE_SYCL
-    printf("Found %d with distance %.3f from functor\n", primitive, distance);
-#endif
-    out({primitive, distance});
   }
 };
 
@@ -105,36 +90,39 @@ int main(int argc, char *argv[])
   {
     Kokkos::View<int *, MemorySpace> values("values", 0);
     Kokkos::View<int *, MemorySpace> offsets("offsets", 0);
-    bvh.query(ExecutionSpace{}, FirstOctant{}, PrintfCallback{}, values,
-              offsets);
+    ArborX::query(bvh, ExecutionSpace{}, FirstOctant{}, PrintfCallback{},
+                  values, offsets);
 #ifndef __NVCC__
-    bvh.query(ExecutionSpace{}, FirstOctant{},
-              KOKKOS_LAMBDA(auto /*predicate*/, int primitive,
-                            auto /*output_functor*/) {
-#ifndef KOKKOS_ENABLE_SYCL
-                printf("Found %d from generic lambda\n", primitive);
+    ArborX::query(bvh, ExecutionSpace{}, FirstOctant{},
+                  KOKKOS_LAMBDA(auto /*predicate*/, int primitive,
+                                auto /*output_functor*/) {
+#ifndef __SYCL_DEVICE_ONLY__
+                    printf("Found %d from generic lambda\n", primitive);
+#else
+                    (void)primitive;
 #endif
-              },
-              values, offsets);
+                  },
+                  values, offsets);
 #endif
   }
 
   {
     int const k = 10;
-    Kokkos::View<PairIndexDistance *, MemorySpace> values("values", 0);
+    Kokkos::View<int *, MemorySpace> values("values", 0);
     Kokkos::View<int *, MemorySpace> offsets("offsets", 0);
-    bvh.query(ExecutionSpace{}, NearestToOrigin{k}, PrintfCallback{}, values,
-              offsets);
+    ArborX::query(bvh, ExecutionSpace{}, NearestToOrigin{k}, PrintfCallback{},
+                  values, offsets);
 #ifndef __NVCC__
-    bvh.query(ExecutionSpace{}, NearestToOrigin{k},
-              KOKKOS_LAMBDA(auto /*predicate*/, int primitive, float distance,
-                            auto /*output_functor*/) {
-#ifndef KOKKOS_ENABLE_SYCL
-                printf("Found %d with distance %.3f from generic lambda\n",
-                       primitive, distance);
+    ArborX::query(bvh, ExecutionSpace{}, NearestToOrigin{k},
+                  KOKKOS_LAMBDA(auto /*predicate*/, int primitive,
+                                auto /*output_functor*/) {
+#ifndef __SYCL_DEVICE_ONLY__
+                    printf("Found %d from generic lambda\n", primitive);
+#else
+                    (void)primitive;
 #endif
-              },
-              values, offsets);
+                  },
+                  values, offsets);
 #endif
   }
 
@@ -146,8 +134,10 @@ int main(int argc, char *argv[])
 #ifndef __NVCC__
     bvh.query(ExecutionSpace{}, FirstOctant{},
               KOKKOS_LAMBDA(auto /*predicate*/, int j) {
-#ifndef KOKKOS_ENABLE_SYCL
+#ifndef __SYCL_DEVICE_ONLY__
                 printf("%d %d %d\n", ++c(), -1, j);
+#else
+                (void)j;
 #endif
               });
 #endif

@@ -10,6 +10,7 @@
  ****************************************************************************/
 
 #include <ArborX_BoostRTreeHelpers.hpp>
+#include <ArborX_CrsGraphWrapper.hpp>
 #include <ArborX_LinearBVH.hpp>
 #include <ArborX_Version.hpp>
 
@@ -225,9 +226,9 @@ void BM_knn_search(benchmark::State &state, Spec const &spec)
     Kokkos::View<int *, DeviceType> offset("offset", 0);
     Kokkos::View<int *, DeviceType> indices("indices", 0);
     auto const start = std::chrono::high_resolution_clock::now();
-    index.query(ExecutionSpace{}, queries, indices, offset,
-                ArborX::Experimental::TraversalPolicy().setPredicateSorting(
-                    spec.sort_predicates));
+    ArborX::query(index, ExecutionSpace{}, queries, indices, offset,
+                  ArborX::Experimental::TraversalPolicy().setPredicateSorting(
+                      spec.sort_predicates));
     auto const end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed_seconds = end - start;
     state.SetIterationTime(elapsed_seconds.count());
@@ -235,12 +236,12 @@ void BM_knn_search(benchmark::State &state, Spec const &spec)
 }
 
 template <typename DeviceType>
-struct NearestCallback
+struct CountCallback
 {
   Kokkos::View<int *, DeviceType> count_;
 
   template <typename Query>
-  KOKKOS_FUNCTION void operator()(Query const &query, int, float) const
+  KOKKOS_FUNCTION void operator()(Query const &query, int) const
   {
     auto const i = ArborX::getData(query);
     Kokkos::atomic_fetch_add(&count_(i), 1);
@@ -265,7 +266,7 @@ void BM_knn_callback_search(benchmark::State &state, Spec const &spec)
   {
     Kokkos::View<int *, DeviceType> num_neigh("Testing::num_neigh",
                                               spec.n_queries);
-    NearestCallback<DeviceType> callback{num_neigh};
+    CountCallback<DeviceType> callback{num_neigh};
 
     auto const start = std::chrono::high_resolution_clock::now();
     index.query(ExecutionSpace{}, queries, callback,
@@ -295,28 +296,15 @@ void BM_radius_search(benchmark::State &state, Spec const &spec)
     Kokkos::View<int *, DeviceType> offset("offset", 0);
     Kokkos::View<int *, DeviceType> indices("indices", 0);
     auto const start = std::chrono::high_resolution_clock::now();
-    index.query(ExecutionSpace{}, queries, indices, offset,
-                ArborX::Experimental::TraversalPolicy()
-                    .setPredicateSorting(spec.sort_predicates)
-                    .setBufferSize(spec.buffer_size));
+    ArborX::query(index, ExecutionSpace{}, queries, indices, offset,
+                  ArborX::Experimental::TraversalPolicy()
+                      .setPredicateSorting(spec.sort_predicates)
+                      .setBufferSize(spec.buffer_size));
     auto const end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed_seconds = end - start;
     state.SetIterationTime(elapsed_seconds.count());
   }
 }
-
-template <typename DeviceType>
-struct SpatialCallback
-{
-  Kokkos::View<int *, DeviceType> count_;
-
-  template <typename Query>
-  KOKKOS_FUNCTION void operator()(Query const &query, int) const
-  {
-    auto const i = ArborX::getData(query);
-    Kokkos::atomic_fetch_add(&count_(i), 1);
-  }
-};
 
 template <typename ExecutionSpace, class TreeType>
 void BM_radius_callback_search(benchmark::State &state, Spec const &spec)
@@ -336,7 +324,7 @@ void BM_radius_callback_search(benchmark::State &state, Spec const &spec)
   {
     Kokkos::View<int *, DeviceType> num_neigh("Testing::num_neigh",
                                               spec.n_queries);
-    SpatialCallback<DeviceType> callback{num_neigh};
+    CountCallback<DeviceType> callback{num_neigh};
 
     auto const start = std::chrono::high_resolution_clock::now();
     index.query(ExecutionSpace{}, queries, callback,
@@ -601,7 +589,7 @@ int main(int argc, char *argv[])
       throw std::runtime_error("OpenMPTarget backend not available!");
 #endif
 
-#ifdef KOKKOS_ENABLE_
+#ifdef KOKKOS_ENABLE_SYCL
     if (spec.backends == "all" || spec.backends == "sycl")
       register_benchmark<
           Kokkos::Experimental::SYCL,

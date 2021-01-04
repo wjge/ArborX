@@ -97,12 +97,12 @@ BOOST_AUTO_TEST_CASE(equals)
 {
   using ArborX::Details::equals;
   // points
-  STATIC_ASSERT(equals({{0., 0., 0.}}, {{0., 0., 0.}}));
-  STATIC_ASSERT(!equals({{0., 0., 0.}}, {{1., 1., 1.}}));
+  STATIC_ASSERT(equals(Point{{0., 0., 0.}}, {{0., 0., 0.}}));
+  STATIC_ASSERT(!equals(Point{{0., 0., 0.}}, {{1., 1., 1.}}));
   // boxes
-  STATIC_ASSERT(equals({{{0.0, 0.0, 0.0}}, {{1.0, 1.0, 1.0}}},
+  STATIC_ASSERT(equals(Box{{{0.0, 0.0, 0.0}}, {{1.0, 1.0, 1.0}}},
                        {{{0.0, 0.0, 0.0}}, {{1.0, 1.0, 1.0}}}));
-  STATIC_ASSERT(!equals({{{0.0, 0.0, 0.0}}, {{1.0, 0.0, 1.0}}},
+  STATIC_ASSERT(!equals(Box{{{0.0, 0.0, 0.0}}, {{1.0, 0.0, 1.0}}},
                         {{{-1.0, -1.0, -1.0}}, {{1.0, 1.0, 1.0}}}));
   // spheres
   STATIC_ASSERT(equals({{{0., 0., 0.}}, 1.}, {{{0., 0., 0.}}, 1.}));

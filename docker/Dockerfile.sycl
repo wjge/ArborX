@@ -1,31 +1,21 @@
-ARG BASE=rocm/dev-ubuntu-20.04:4.0
+ARG BASE=nvidia/cuda:10.2-devel
 FROM $BASE
 
 ARG NPROCS=4
 
-RUN apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -yq \
-        build-essential \
+RUN apt-get update && apt-get install -y \
         bc \
-        curl \
-        git \
-        kmod \
         wget \
-        jq \
-        vim \
-        gdb \
         ccache \
-        libbz2-dev \
-        libicu-dev \
-        python-dev \
-        autotools-dev \
+        ninja-build \
+        python3 \
+        git \
+        vim \
+        jq \
         libopenmpi-dev \
-        rocthrust \
         && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
-
-ENV PATH=/opt/rocm/bin:$PATH
 
 RUN KEYDUMP_URL=https://cloud.cees.ornl.gov/download && \
     KEYDUMP_FILE=keydump && \
@@ -35,22 +25,39 @@ RUN KEYDUMP_URL=https://cloud.cees.ornl.gov/download && \
     gpg --verify ${KEYDUMP_FILE}.sig ${KEYDUMP_FILE} && \
     rm ${KEYDUMP_FILE}*
 
-# Install CMake
+ARG CMAKE_VERSION=3.19.0
 ENV CMAKE_DIR=/opt/cmake
-RUN CMAKE_VERSION=3.18.5 && \
-    CMAKE_KEY=2D2CEF1034921684 && \
+RUN CMAKE_KEY=2D2CEF1034921684 && \
     CMAKE_URL=https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION} && \
     CMAKE_SCRIPT=cmake-${CMAKE_VERSION}-Linux-x86_64.sh && \
     CMAKE_SHA256=cmake-${CMAKE_VERSION}-SHA-256.txt && \
     wget --quiet ${CMAKE_URL}/${CMAKE_SHA256} && \
     wget --quiet ${CMAKE_URL}/${CMAKE_SHA256}.asc && \
     wget --quiet ${CMAKE_URL}/${CMAKE_SCRIPT} && \
+    gpg --keyserver pool.sks-keyservers.net --recv-keys ${CMAKE_KEY} && \
     gpg --verify ${CMAKE_SHA256}.asc ${CMAKE_SHA256} && \
     grep ${CMAKE_SCRIPT} ${CMAKE_SHA256} | sha256sum --check && \
     mkdir -p ${CMAKE_DIR} && \
     sh ${CMAKE_SCRIPT} --skip-license --prefix=${CMAKE_DIR} && \
     rm cmake*
 ENV PATH=${CMAKE_DIR}/bin:$PATH
+
+ENV SYCL_DIR=/opt/sycl
+RUN SYCL_VERSION=20201207 && \
+    SYCL_URL=https://github.com/intel/llvm/archive/sycl-nightly && \
+    SYCL_ARCHIVE=${SYCL_VERSION}.tar.gz && \
+    SCRATCH_DIR=/scratch && mkdir -p ${SCRATCH_DIR} && cd ${SCRATCH_DIR} && \
+    wget --quiet ${SYCL_URL}/${SYCL_ARCHIVE} && \
+    mkdir llvm && \
+    tar -xf ${SYCL_ARCHIVE} -C llvm --strip-components=1 && \
+    cd llvm && \
+    python3 buildbot/configure.py --cuda && \
+    python3 buildbot/compile.py && \
+    mkdir -p ${SYCL_DIR} && \
+    mv ${SCRATCH_DIR}/llvm/build/install/* ${SYCL_DIR} && \
+    echo "${SYCL_DIR}/lib" > /etc/ld.so.conf.d/sycl.conf && ldconfig && \
+    rm -rf ${SCRATCH_DIR}
+ENV PATH=${SYCL_DIR}/bin:$PATH
 
 # Install Boost
 ENV BOOST_DIR=/opt/boost
@@ -92,9 +99,9 @@ RUN SCRATCH_DIR=/scratch && mkdir -p ${SCRATCH_DIR} && cd ${SCRATCH_DIR} && \
     make -j${NPROCS} && make install && \
     rm -rf ${SCRATCH_DIR}
 
-# Install Kokkos
-ARG KOKKOS_VERSION=3.2.00
-ARG KOKKOS_OPTIONS="-DKokkos_ENABLE_HIP=ON -DKokkos_ARCH_VEGA906=ON"
+# Install Kokkos, the commit is post 3.3.00 release
+ARG KOKKOS_VERSION=8c241078d0b844633cb1eae186bbb6a8a810ff5d
+ARG KOKKOS_OPTIONS="-DKokkos_ENABLE_SYCL=ON -DCMAKE_CXX_FLAGS=-Wno-unknown-cuda-version -DKokkos_ENABLE_UNSUPPORTED_ARCHS=ON -DKokkos_ARCH_VOLTA70=ON -DCMAKE_CXX_STANDARD=17"
 ENV KOKKOS_DIR=/opt/kokkos
 RUN KOKKOS_URL=https://github.com/kokkos/kokkos/archive/${KOKKOS_VERSION}.tar.gz && \
     KOKKOS_ARCHIVE=kokkos-${KOKKOS_HASH}.tar.gz && \
@@ -104,6 +111,6 @@ RUN KOKKOS_URL=https://github.com/kokkos/kokkos/archive/${KOKKOS_VERSION}.tar.gz
     tar -xf ${KOKKOS_ARCHIVE} -C kokkos --strip-components=1 && \
     cd kokkos && \
     mkdir -p build && cd build && \
-    cmake -D CMAKE_BUILD_TYPE=Release -D CMAKE_INSTALL_PREFIX=${KOKKOS_DIR} -D CMAKE_CXX_COMPILER=hipcc ${KOKKOS_OPTIONS} .. && \
+    cmake -D CMAKE_BUILD_TYPE=Release -D CMAKE_INSTALL_PREFIX=${KOKKOS_DIR} -D CMAKE_CXX_COMPILER=clang++ ${KOKKOS_OPTIONS} .. && \
     make -j${NPROCS} install && \
     rm -rf ${SCRATCH_DIR}

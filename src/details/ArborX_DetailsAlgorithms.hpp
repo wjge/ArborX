@@ -14,6 +14,7 @@
 #include <ArborX_Box.hpp>
 #include <ArborX_DetailsKokkosExt.hpp> // min, max, isFinite
 #include <ArborX_Point.hpp>
+#include <ArborX_Ray.hpp>
 #include <ArborX_Sphere.hpp>
 #include <ArborX_Ray.hpp>
 
@@ -44,6 +45,12 @@ KOKKOS_INLINE_FUNCTION
 constexpr bool equals(Sphere const &l, Sphere const &r)
 {
   return equals(l.centroid(), r.centroid()) && l.radius() == r.radius();
+}
+
+KOKKOS_INLINE_FUNCTION
+constexpr bool equals(Ray const &l, Ray const &r)
+{
+  return equals(l.origin(), r.origin()) && equals(l.direction(), r.direction());
 }
 
 KOKKOS_INLINE_FUNCTION
@@ -109,16 +116,7 @@ float distance(Point const &point, Sphere const &sphere)
 
 // expand an axis-aligned bounding box to include a point
 KOKKOS_INLINE_FUNCTION
-void expand(Box &box, Point const &point)
-{
-  using KokkosExt::max;
-  using KokkosExt::min;
-  for (int d = 0; d < 3; ++d)
-  {
-    box.minCorner()[d] = min(box.minCorner()[d], point[d]);
-    box.maxCorner()[d] = max(box.maxCorner()[d], point[d]);
-  }
-}
+void expand(Box &box, Point const &point) { box += point; }
 
 // expand an axis-aligned bounding box to include another box
 // NOTE: Box type is templated here to be able to use expand(box, box) in a
@@ -129,13 +127,7 @@ template <typename BOX,
               typename std::remove_volatile<BOX>::type, Box>::value>::type>
 KOKKOS_INLINE_FUNCTION void expand(BOX &box, BOX const &other)
 {
-  using KokkosExt::max;
-  using KokkosExt::min;
-  for (int d = 0; d < 3; ++d)
-  {
-    box.minCorner()[d] = min(box.minCorner()[d], other.minCorner()[d]);
-    box.maxCorner()[d] = max(box.maxCorner()[d], other.maxCorner()[d]);
-  }
+  box += other;
 }
 
 // expand an axis-aligned bounding box to include a sphere
