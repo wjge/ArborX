@@ -40,55 +40,54 @@ struct AccessTraits<Predicates, PredicatesTag>
 };
 } // namespace ArborX
 
-KOKKOS_FUNCTION float dotproduct(ArborX::Point const &v1,
-                                 ArborX::Point const &v2)
-{
-  return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
-}
-
-KOKKOS_FUNCTION float solveQuadratic(const float &b, const float &c)
-{
-  float delta = b * b - 4.0 * c;
-  if (delta <= 0.0)
-    return 0.0;
-  else
-  {
-    float q =
-        (b > 0) ? -0.5 * (b + std::sqrt(delta)) : -0.5 * (b - std::sqrt(delta));
-    return std::abs(q - c / q);
-  }
-}
-
-KOKKOS_FUNCTION float overlap(ArborX::Ray const &ray, ArborX::Box const &box)
-{
-  ArborX::Point mincorner = box.minCorner();
-  ArborX::Point maxcorner = box.maxCorner();
-
-  ArborX::Point center{(float)0.5 * (mincorner[0] + maxcorner[0]),
-                       (float)0.5 * (mincorner[1] + maxcorner[1]),
-                       (float)0.5 * (mincorner[2] + maxcorner[2])};
-
-  float r = 0.5 * (maxcorner[0] - mincorner[0]);
-
-  ArborX::Point orig = ray.origin();
-
-  ArborX::Point L{orig[0] - center[0], orig[1] - center[1],
-                  orig[2] - center[2]};
-
-  //  for normalized direction vector a = 1.0
-  auto dir = ray.direction();
-
-  float b = 2.0 * dotproduct(dir, L);
-  float c = dotproduct(L, L) - r * r;
-
-  float delta = b * b - 4.0 * c;
-
-  return solveQuadratic(b, c);
-}
-
 struct Callback
 {
   ArborX::Primitives boxes;
+
+  KOKKOS_FUNCTION float dotproduct(ArborX::Point const &v1,
+                                   ArborX::Point const &v2) const
+  {
+    return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
+  }
+
+  KOKKOS_FUNCTION float solveQuadratic(const float &b, const float &c) const
+  {
+    float delta = b * b - 4.0 * c;
+    if (delta <= 0.0)
+      return 0.0;
+    else
+    {
+      float q = (b > 0) ? -0.5 * (b + std::sqrt(delta))
+                        : -0.5 * (b - std::sqrt(delta));
+      return std::abs(q - c / q);
+    }
+  }
+
+  KOKKOS_FUNCTION float overlap(ArborX::Ray const &ray,
+                                ArborX::Box const &box) const
+  {
+    ArborX::Point mincorner = box.minCorner();
+    ArborX::Point maxcorner = box.maxCorner();
+
+    ArborX::Point center{(float)0.5 * (mincorner[0] + maxcorner[0]),
+                         (float)0.5 * (mincorner[1] + maxcorner[1]),
+                         (float)0.5 * (mincorner[2] + maxcorner[2])};
+
+    float r = 0.5 * (maxcorner[0] - mincorner[0]);
+
+    ArborX::Point orig = ray.origin();
+
+    ArborX::Point L{orig[0] - center[0], orig[1] - center[1],
+                    orig[2] - center[2]};
+
+    //  for normalized direction vector a = 1.0
+    auto dir = ray.direction();
+
+    float b = 2.0 * dotproduct(dir, L);
+    float c = dotproduct(L, L) - r * r;
+
+    return solveQuadratic(b, c);
+  }
 
   template <typename Predicate, typename OutputFunctor>
   KOKKOS_FUNCTION void operator()(Predicate predicate, int primitive,
@@ -143,8 +142,8 @@ int main(int argc, char *argv[])
   {
     Kokkos::View<int *, MemorySpace> values("values", 0);
     Kokkos::View<int *, MemorySpace> offsets("offsets", 0);
-    ArborX::query(bvh, ExecutionSpace{}, rays_view, Callback{}, values,
-                  offsets);
+    ArborX::query(bvh, ExecutionSpace{}, rays_view, Callback{boxes_view},
+                  values, offsets);
   }
   return 0;
 }
