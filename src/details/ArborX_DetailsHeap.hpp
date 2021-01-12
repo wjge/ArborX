@@ -1,5 +1,5 @@
 /****************************************************************************
- * Copyright (c) 2012-2020 by the ArborX authors                            *
+ * Copyright (c) 2017-2021 by the ArborX authors                            *
  * All rights reserved.                                                     *
  *                                                                          *
  * This file is part of the ArborX library. ArborX is                       *
@@ -104,6 +104,15 @@ KOKKOS_INLINE_FUNCTION void popHeap(RandomIterator first, RandomIterator last,
                std::move(*(last - 1)), comp);
     *(last - 1) = std::move(value);
   }
+}
+
+template <typename RandomIterator, typename Compare>
+KOKKOS_INLINE_FUNCTION void makeHeap(RandomIterator first, RandomIterator last,
+                                     Compare comp)
+{
+  RandomIterator heap_end = first;
+  while (heap_end != last)
+    pushHeap(first, ++heap_end, comp);
 }
 
 template <typename RandomIterator, typename Compare>

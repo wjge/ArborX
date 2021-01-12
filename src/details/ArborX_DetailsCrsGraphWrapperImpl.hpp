@@ -1,5 +1,5 @@
 /****************************************************************************
- * Copyright (c) 2012-2020 by the ArborX authors                            *
+ * Copyright (c) 2017-2021 by the ArborX authors                            *
  * All rights reserved.                                                     *
  *                                                                          *
  * This file is part of the ArborX library. ArborX is                       *
@@ -392,7 +392,7 @@ queryDispatch(Tag, Tree const &tree, ExecutionSpace const &space,
     Kokkos::Profiling::pushRegion(profiling_prefix + "::compute_permutation");
     auto permute =
         Details::BatchedQueries<DeviceType>::sortQueriesAlongZOrderCurve(
-            space, tree.bounds(), predicates);
+            space, static_cast<Box>(tree.bounds()), predicates);
     Kokkos::Profiling::popRegion();
 
     queryImpl(space, tree, predicates, callback, out, offset, permute,
