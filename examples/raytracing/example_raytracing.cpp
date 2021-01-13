@@ -12,6 +12,7 @@
 #include <ArborX.hpp>
 
 #include <Kokkos_Core.hpp>
+#include <Kokkos_ScatterView.hpp>
 
 #include <iostream>
 #include <random>
@@ -44,6 +45,9 @@ struct Callback
 {
   ArborX::Primitives boxes;
 
+  Kokkos::View<float *, MemorySpace, Kokkos::MemoryTraits<Kokkos::Atomic>>
+      accumulator;
+
   KOKKOS_FUNCTION float dotproduct(ArborX::Point const &v1,
                                    ArborX::Point const &v2) const
   {
@@ -54,12 +58,33 @@ struct Callback
   {
     float delta = b * b - 4.0 * c;
     if (delta <= 0.0)
+      // NO intersection
       return 0.0;
     else
     {
       float q = (b > 0) ? -0.5 * (b + std::sqrt(delta))
                         : -0.5 * (b - std::sqrt(delta));
-      return std::abs(q - c / q);
+
+      // printf("q=%f, c/q = %f \n", q, c / q);
+
+      if (q < 0)
+      {
+        // both intersections are BEHIND
+        if (c > 0)
+          return 0.0;
+        // one point is behind
+        else
+          return c / q;
+      }
+      else
+      {
+        // both intersections are AHEAD
+        if (c > 0)
+          return std::abs(q - c / q);
+        // one point is behind
+        else
+          return q;
+      }
     }
   }
 
@@ -89,18 +114,17 @@ struct Callback
     return solveQuadratic(b, c);
   }
 
-  template <typename Predicate, typename OutputFunctor>
-  KOKKOS_FUNCTION void operator()(Predicate predicate, int primitive,
-                                  OutputFunctor const &out) const
+  template <typename Predicate>
+  KOKKOS_FUNCTION void operator()(Predicate const &predicate,
+                                  int primitive) const
   {
     auto const &ray = ArborX::getGeometry(predicate);
     auto const &box = boxes(primitive);
     float length = overlap(ray, box);
-
+    // auto i = getData(predicate);
 #ifndef __SYCL_DEVICE_ONLY__
     printf("ray hit box %d with the overlap %f. \n", primitive, length);
 #endif
-    out(primitive);
   }
 };
 
@@ -108,21 +132,33 @@ int main(int argc, char *argv[])
 {
   Kokkos::ScopeGuard guard(argc, argv);
 
-  int const n = 10;
+  // size of the domain (LxLxL)
+  const float L = 100.0;
+
+  // number of primitives
+  int const n = 100;
   std::vector<ArborX::Box> boxes;
-  // Fill vector with random points in [-1, 1]^3
-  std::uniform_real_distribution<float> dis{-1., 1.};
+  std::uniform_real_distribution<float> uniform{0.0, 1.0};
   std::default_random_engine gen;
-  auto rd = [&]() { return dis(gen); };
+  auto rd_uniform = [&]() { return uniform(gen); };
+
+  // radius
+  const float mu_R = 1.0;
+  const float sigma_R = mu_R / 3.0;
+
+  std::normal_distribution<> normal{mu_R, sigma_R};
+  auto rd_normal = [&]() { return std::max(normal(gen), 0.0); };
 
   std::generate_n(std::back_inserter(boxes), n, [&]() {
-    float x0 = rd();
-    float y0 = rd();
-    float z0 = rd();
+    float r = rd_normal();
 
-    float x1 = x0 + 1.0;
-    float y1 = y0 + 1.0;
-    float z1 = z0 + 1.0;
+    float x0 = rd_uniform() * L - r;
+    float y0 = rd_uniform() * L - r;
+    float z0 = rd_uniform() * L - r;
+
+    float x1 = x0 + 2.0 * r;
+    float y1 = y0 + 2.0 * r;
+    float z1 = z0 + 2.0 * r;
 
     return ArborX::Box{{x0, y0, z0}, {x1, y1, z1}};
   });
@@ -136,14 +172,42 @@ int main(int argc, char *argv[])
   Kokkos::deep_copy(boxes_view, boxes_host);
   ArborX::BVH<MemorySpace> bvh{ExecutionSpace{}, boxes_view};
 
-  int const m = 1;
+  // initialize predicates
+  int const m = 10000;
+  float const PI = 4.0 * std::atan(1.0);
+
+  std::vector<ArborX::Ray> rays;
+  std::generate_n(std::back_inserter(rays), m, [&]() {
+    float x = rd_uniform() * L;
+    float y = rd_uniform() * L;
+    float z = 0.0;
+
+    float sinazimuth = std::sin(rd_uniform() * PI * 2.0);
+    float cosazimuth = std::sqrt(1 - sinazimuth * sinazimuth);
+    float cospolar = 1.0 - rd_uniform();
+    float sinpolar = std::sqrt(1.0 - cospolar * cospolar);
+
+    float dirx = sinpolar * cosazimuth;
+    float diry = sinpolar * sinazimuth;
+    float dirz = cospolar;
+
+    return ArborX::Ray{{x, y, z}, {dirx, diry, dirz}};
+  });
+
   ArborX::Predicates rays_view("rays_view", m);
+  auto rays_host = Kokkos::create_mirror_view(rays_view);
+  for (int i = 0; i < m; ++i)
+  {
+    rays_host[i] = rays[i];
+  }
+
+  Kokkos::deep_copy(rays_view, rays_host);
 
   {
-    Kokkos::View<int *, MemorySpace> values("values", 0);
-    Kokkos::View<int *, MemorySpace> offsets("offsets", 0);
-    ArborX::query(bvh, ExecutionSpace{}, rays_view, Callback{boxes_view},
-                  values, offsets);
+    // accumulator
+    Kokkos::View<float[m], MemorySpace> overlap_view("overlap_view");
+
+    bvh.query(ExecutionSpace{}, rays_view, Callback{boxes_view, overlap_view});
   }
   return 0;
 }
