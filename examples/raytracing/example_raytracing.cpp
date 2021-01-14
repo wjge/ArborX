@@ -35,7 +35,7 @@ struct AccessTraits<Predicates, PredicatesTag>
   }
   KOKKOS_FUNCTION static auto get(Predicates const &predicates, std::size_t i)
   {
-    return intersects(predicates(i));
+    return attach(intersects(predicates(i)), (int)i);
   }
   using memory_space = MemorySpace;
 };
@@ -121,9 +121,11 @@ struct Callback
     auto const &ray = ArborX::getGeometry(predicate);
     auto const &box = boxes(primitive);
     float length = overlap(ray, box);
-    // auto i = getData(predicate);
+    int i = getData(predicate);
+    accumulator(i)++;
+
 #ifndef __SYCL_DEVICE_ONLY__
-    printf("ray hit box %d with the overlap %f. \n", primitive, length);
+    printf("ray %d hit box %d with the overlap %f. \n", i, primitive, length);
 #endif
   }
 };
