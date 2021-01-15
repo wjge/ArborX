@@ -16,7 +16,6 @@
 #include <ArborX_Point.hpp>
 #include <ArborX_Ray.hpp>
 #include <ArborX_Sphere.hpp>
-#include <ArborX_Ray.hpp>
 
 #include <Kokkos_Macros.hpp>
 
