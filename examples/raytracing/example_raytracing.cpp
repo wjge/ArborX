@@ -1,5 +1,5 @@
 /****************************************************************************
- * Copyright (c) 2012-2020 by the ArborX authors                            *
+ * Copyright (c) 2012-2021 by the ArborX authors                            *
  * All rights reserved.                                                     *
  *                                                                          *
  * This file is part of the ArborX library. ArborX is                       *
@@ -12,7 +12,6 @@
 #include <ArborX.hpp>
 
 #include <Kokkos_Core.hpp>
-#include <Kokkos_ScatterView.hpp>
 
 #include <iostream>
 #include <random>
@@ -122,7 +121,7 @@ struct Callback
     auto const &box = boxes(primitive);
     float length = overlap(ray, box);
     int i = getData(predicate);
-    accumulator(i)++;
+    accumulator(i) += length;
 
 #ifndef __SYCL_DEVICE_ONLY__
     printf("ray %d hit box %d with the overlap %f. \n", i, primitive, length);
@@ -176,7 +175,7 @@ int main(int argc, char *argv[])
 
   // initialize predicates
   int const m = 10000;
-  float const PI = 4.0 * std::atan(1.0);
+  float const twoPI = 2.0 * std::atan(1.0);
 
   std::vector<ArborX::Ray> rays;
   std::generate_n(std::back_inserter(rays), m, [&]() {
@@ -184,7 +183,7 @@ int main(int argc, char *argv[])
     float y = rd_uniform() * L;
     float z = 0.0;
 
-    float sinazimuth = std::sin(rd_uniform() * PI * 2.0);
+    float sinazimuth = std::sin(rd_uniform() * twoPI);
     float cosazimuth = std::sqrt(1 - sinazimuth * sinazimuth);
     float cospolar = 1.0 - rd_uniform();
     float sinpolar = std::sqrt(1.0 - cospolar * cospolar);
@@ -210,6 +209,16 @@ int main(int argc, char *argv[])
     Kokkos::View<float[m], MemorySpace> overlap_view("overlap_view");
 
     bvh.query(ExecutionSpace{}, rays_view, Callback{boxes_view, overlap_view});
+
+    /*check the results
+    auto overlap_host = Kokkos::create_mirror_view(overlap_view);
+    Kokkos::deep_copy(overlap_host, overlap_view);
+
+    for (int i = 0; i < m; ++i)
+    {
+      std::cout << "overlap_ray_" << i << ":" << overlap_host[i] << std::endl;
+    }
+    */
   }
   return 0;
 }
