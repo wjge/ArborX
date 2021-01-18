@@ -1,5 +1,5 @@
 /****************************************************************************
- * Copyright (c) 2012-2021 by the ArborX authors                            *
+ * Copyright (c) 2017-2021 by the ArborX authors                            *
  * All rights reserved.                                                     *
  *                                                                          *
  * This file is part of the ArborX library. ArborX is                       *
@@ -17,17 +17,31 @@
 #include <random>
 #include <vector>
 
-using ExecutionSpace = Kokkos::DefaultExecutionSpace;
-using MemorySpace = ExecutionSpace::memory_space;
-
-namespace ArborX
+template <typename MemorySpace>
+struct ArborX::AccessTraits<Kokkos::View<ArborX::Sphere *, MemorySpace>,
+                            ArborX::PrimitivesTag>
 {
-using Primitives = Kokkos::View<Box *, MemorySpace>;
-using Predicates = Kokkos::View<Ray *, MemorySpace>;
+  using Primitives = Kokkos::View<ArborX::Sphere *, MemorySpace>;
+  KOKKOS_FUNCTION static std::size_t size(const Primitives &primitives)
+  {
+    return primitives.extent(0);
+  }
+  KOKKOS_FUNCTION static ArborX::Box get(Primitives const &primitives,
+                                         std::size_t i)
+  {
+    auto const &sphere = primitives(i);
+    auto const &c = sphere.centroid();
+    auto const &r = sphere.radious();
+    return {{c[0] - r, c[1] - r, c[2] - r}, {c[0] + r, c[1] + r, c[2] + r}};
+  }
+  using memory_space = MemorySpace;
+};
 
-template <>
-struct AccessTraits<Predicates, PredicatesTag>
+template <typename MemorySpace>
+struct ArborX::AccessTraits<Kokkos::View<ArborX::Ray *, MemorySpace>,
+                            ArborX::PredicatesTag>
 {
+  using Predicates = Kokkos::View<ArborX::Ray *, MemorySpace>;
   KOKKOS_FUNCTION static std::size_t size(const Predicates &predicates)
   {
     return predicates.extent(0);
@@ -38,17 +52,19 @@ struct AccessTraits<Predicates, PredicatesTag>
   }
   using memory_space = MemorySpace;
 };
-} // namespace ArborX
 
+template <typename MemorySpace>
 struct Callback
 {
-  ArborX::Primitives boxes;
+  using Primitives = Kokkos::View<ArborX::Sphere *, MemorySpace>;
+  using Vector = ArborX::Point;
+
+  Primitives spheres;
 
   Kokkos::View<float *, MemorySpace, Kokkos::MemoryTraits<Kokkos::Atomic>>
       accumulator;
 
-  KOKKOS_FUNCTION float dotproduct(ArborX::Point const &v1,
-                                   ArborX::Point const &v2) const
+  KOKKOS_FUNCTION float dotproduct(Vector const &v1, Vector const &v2) const
   {
     return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
   }
@@ -87,22 +103,15 @@ struct Callback
     }
   }
 
-  KOKKOS_FUNCTION float overlap(ArborX::Ray const &ray,
-                                ArborX::Box const &box) const
+  KOKKOS_FUNCTION float overlap_distance(ArborX::Ray const &ray,
+                                         ArborX::Sphere const &sphere) const
   {
-    ArborX::Point mincorner = box.minCorner();
-    ArborX::Point maxcorner = box.maxCorner();
-
-    ArborX::Point center{(float)0.5 * (mincorner[0] + maxcorner[0]),
-                         (float)0.5 * (mincorner[1] + maxcorner[1]),
-                         (float)0.5 * (mincorner[2] + maxcorner[2])};
-
-    float r = 0.5 * (maxcorner[0] - mincorner[0]);
+    auto center = sphere.centroid();
+    auto r = sphere.radius();
 
     ArborX::Point orig = ray.origin();
 
-    ArborX::Point L{orig[0] - center[0], orig[1] - center[1],
-                    orig[2] - center[2]};
+    Vector L{orig[0] - center[0], orig[1] - center[1], orig[2] - center[2]};
 
     //  for normalized direction vector a = 1.0
     auto dir = ray.direction();
@@ -115,22 +124,24 @@ struct Callback
 
   template <typename Predicate>
   KOKKOS_FUNCTION void operator()(Predicate const &predicate,
-                                  int primitive) const
+                                  int primitive_index) const
   {
     auto const &ray = ArborX::getGeometry(predicate);
-    auto const &box = boxes(primitive);
-    float length = overlap(ray, box);
+    auto const &sphere = spheres(primitive_index);
+    float length = overlap_distance(ray, sphere);
     int i = getData(predicate);
     accumulator(i) += length;
-
-#ifndef __SYCL_DEVICE_ONLY__
-    printf("ray %d hit box %d with the overlap %f. \n", i, primitive, length);
-#endif
   }
 };
 
 int main(int argc, char *argv[])
 {
+  using ExecutionSpace = Kokkos::DefaultExecutionSpace;
+  using MemorySpace = ExecutionSpace::memory_space;
+
+  using Primitives = Kokkos::View<ArborX::Sphere *, MemorySpace>;
+  using Predicates = Kokkos::View<ArborX::Ray *, MemorySpace>;
+
   Kokkos::ScopeGuard guard(argc, argv);
 
   // size of the domain (LxLxL)
@@ -138,7 +149,7 @@ int main(int argc, char *argv[])
 
   // number of primitives
   int const n = 100;
-  std::vector<ArborX::Box> boxes;
+  std::vector<ArborX::Sphere> spheres;
   std::uniform_real_distribution<float> uniform{0.0, 1.0};
   std::default_random_engine gen;
   auto rd_uniform = [&]() { return uniform(gen); };
@@ -150,32 +161,18 @@ int main(int argc, char *argv[])
   std::normal_distribution<> normal{mu_R, sigma_R};
   auto rd_normal = [&]() { return std::max(normal(gen), 0.0); };
 
-  std::generate_n(std::back_inserter(boxes), n, [&]() {
-    float r = rd_normal();
-
-    float x0 = rd_uniform() * L - r;
-    float y0 = rd_uniform() * L - r;
-    float z0 = rd_uniform() * L - r;
-
-    float x1 = x0 + 2.0 * r;
-    float y1 = y0 + 2.0 * r;
-    float z1 = z0 + 2.0 * r;
-
-    return ArborX::Box{{x0, y0, z0}, {x1, y1, z1}};
-  });
-
-  ArborX::Primitives boxes_view("boxes_view", n);
-  auto boxes_host = Kokkos::create_mirror_view(boxes_view);
+  Primitives spheres_view("spheres_view", n);
+  auto spheres_host = Kokkos::create_mirror_view(spheres_view);
   for (int i = 0; i < n; ++i)
   {
-    boxes_host[i] = boxes[i];
+    spheres_host[i].centroid() = {rd_uniform(), rd_uniform(), rd_uniform()};
+    spheres_host[i].radius() = rd_normal();
   }
-  Kokkos::deep_copy(boxes_view, boxes_host);
-  ArborX::BVH<MemorySpace> bvh{ExecutionSpace{}, boxes_view};
+  Kokkos::deep_copy(spheres_view, spheres_host);
+  ArborX::BVH<MemorySpace> bvh{ExecutionSpace{}, spheres_view};
 
   // initialize predicates
   int const m = 10000;
-  float const twoPI = 2.0 * std::atan(1.0);
 
   std::vector<ArborX::Ray> rays;
   std::generate_n(std::back_inserter(rays), m, [&]() {
@@ -183,7 +180,7 @@ int main(int argc, char *argv[])
     float y = rd_uniform() * L;
     float z = 0.0;
 
-    float sinazimuth = std::sin(rd_uniform() * twoPI);
+    float sinazimuth = std::sin(rd_uniform() * 2.0 * M_PI);
     float cosazimuth = std::sqrt(1 - sinazimuth * sinazimuth);
     float cospolar = 1.0 - rd_uniform();
     float sinpolar = std::sqrt(1.0 - cospolar * cospolar);
@@ -195,7 +192,7 @@ int main(int argc, char *argv[])
     return ArborX::Ray{{x, y, z}, {dirx, diry, dirz}};
   });
 
-  ArborX::Predicates rays_view("rays_view", m);
+  Predicates rays_view("rays_view", m);
   auto rays_host = Kokkos::create_mirror_view(rays_view);
   for (int i = 0; i < m; ++i)
   {
@@ -206,19 +203,10 @@ int main(int argc, char *argv[])
 
   {
     // accumulator
-    Kokkos::View<float[m], MemorySpace> overlap_view("overlap_view");
+    Kokkos::View<float *, MemorySpace> overlap_view("overlap_view", m);
 
-    bvh.query(ExecutionSpace{}, rays_view, Callback{boxes_view, overlap_view});
-
-    /*check the results
-    auto overlap_host = Kokkos::create_mirror_view(overlap_view);
-    Kokkos::deep_copy(overlap_host, overlap_view);
-
-    for (int i = 0; i < m; ++i)
-    {
-      std::cout << "overlap_ray_" << i << ":" << overlap_host[i] << std::endl;
-    }
-    */
+    bvh.query(ExecutionSpace{}, rays_view,
+              Callback<MemorySpace>{spheres_view, overlap_view});
   }
   return 0;
 }

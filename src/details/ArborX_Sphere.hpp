@@ -37,6 +37,9 @@ struct Sphere
   constexpr Point const &centroid() const { return _centroid; }
 
   KOKKOS_INLINE_FUNCTION
+  constexpr float &radius() { return _radius; }
+
+  KOKKOS_INLINE_FUNCTION
   constexpr float radius() const { return _radius; }
 
   Point _centroid = {};
