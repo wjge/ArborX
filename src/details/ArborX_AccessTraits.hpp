@@ -8,10 +8,11 @@
  *                                                                          *
  * SPDX-License-Identifier: BSD-3-Clause                                    *
  ****************************************************************************/
+
 #ifndef ARBORX_ACCESS_TRAITS_HPP
 #define ARBORX_ACCESS_TRAITS_HPP
 
-#include <ArborX_DetailsConcepts.hpp> // is_complete
+#include <ArborX_DetailsConcepts.hpp>
 #include <ArborX_DetailsTags.hpp>
 #include <ArborX_Point.hpp>
 #include <ArborX_Predicates.hpp>
@@ -50,6 +51,7 @@ struct AccessTraits<
     return v(i);
   }
 
+  KOKKOS_FUNCTION
   static typename View::size_type size(View const &v) { return v.extent(0); }
 
   using memory_space = typename View::memory_space;
@@ -65,6 +67,7 @@ struct AccessTraits<
     return {{v(i, 0), v(i, 1), v(i, 2)}};
   }
 
+  KOKKOS_FUNCTION
   static typename View::size_type size(View const &v) { return v.extent(0); }
 
   using memory_space = typename View::memory_space;

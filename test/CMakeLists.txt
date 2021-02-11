@@ -41,14 +41,14 @@ if(Kokkos_ENABLE_CUDA AND Boost_VERSION_MINOR GREATER_EQUAL 69)
 endif()
 
 # Compile only, nothing to run
-add_executable(ArborX_AccessTraits.exe tstAccessTraits.cpp)
-target_link_libraries(ArborX_AccessTraits.exe PRIVATE ArborX)
-
-add_executable(ArborX_Callbacks.exe tstCallbacks.cpp)
-target_link_libraries(ArborX_Callbacks.exe PRIVATE ArborX)
-
-add_executable(ArborX_DetailsConcepts.exe tstDetailsConcepts.cpp)
-target_link_libraries(ArborX_DetailsConcepts.exe PRIVATE ArborX)
+add_executable(ArborX_CompileOnly.exe
+  tstCompileOnlyAccessTraits.cpp
+  tstCompileOnlyCallbacks.cpp
+  tstCompileOnlyConcepts.cpp
+  tstCompileOnlyTypeRequirements.cpp
+  tstCompileOnlyMain.cpp
+)
+target_link_libraries(ArborX_CompileOnly.exe PRIVATE ArborX)
 
 add_executable(ArborX_DetailsUtils.exe tstDetailsUtils.cpp utf_main.cpp)
 # TODO link Boost::dynamic_linking interface target to enable dynamic linking
@@ -65,29 +65,41 @@ target_include_directories(ArborX_DetailsAlgorithms.exe PRIVATE ${CMAKE_CURRENT_
 add_test(NAME ArborX_DetailsAlgorithms_Test COMMAND ./ArborX_DetailsAlgorithms.exe)
 
 set(ARBORX_TEST_QUERY_TREE_SOURCES)
-foreach(_test Degenerate)
-  set(_suffix "_InstantiateAll")
-  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/tstQueryTree${_test}${_suffix}.cpp"
+foreach(_test Callbacks Degenerate ManufacturedSolution ComparisonWithBoost)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/tstQueryTree${_test}_BVH.cpp.tmp"
     "#include <ArborX_LinearBVH.hpp>\n"
-    "template <class MemorySpace> using ArborX__BoundingVolumeHierarchy = ArborX::BVH<MemorySpace>;\n"
-    "#define ARBORX_TEST_TREE_TYPES Tuple<ArborX__BoundingVolumeHierarchy>\n"
+    "#define ARBORX_TEST_TREE_TYPES Tuple<ArborX::BVH>\n"
     "#define ARBORX_TEST_DEVICE_TYPES std::tuple<${ARBORX_DEVICE_TYPES}>\n"
     "#include <tstQueryTree${_test}.cpp>\n"
   )
-  list(APPEND ARBORX_TEST_QUERY_TREE_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/tstQueryTree${_test}${_suffix}.cpp")
+  configure_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/tstQueryTree${_test}_BVH.cpp.tmp"
+    "${CMAKE_CURRENT_BINARY_DIR}/tstQueryTree${_test}_BVH.cpp" COPYONLY
+  )
+  list(APPEND ARBORX_TEST_QUERY_TREE_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/tstQueryTree${_test}_BVH.cpp")
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/tstQueryTree${_test}_BF.cpp.tmp"
+    "#include <ArborX_BruteForce.hpp>\n"
+    "#define ARBORX_TEST_TREE_TYPES Tuple<ArborX::BruteForce>\n"
+    "#define ARBORX_TEST_DEVICE_TYPES std::tuple<${ARBORX_DEVICE_TYPES}>\n"
+    "#define ARBORX_TEST_DISABLE_NEAREST_QUERY\n"
+    "#define ARBORX_TEST_DISABLE_CALLBACK_EARLY_EXIT\n"
+    "#include <tstQueryTree${_test}.cpp>\n"
+  )
+  configure_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/tstQueryTree${_test}_BF.cpp.tmp"
+    "${CMAKE_CURRENT_BINARY_DIR}/tstQueryTree${_test}_BF.cpp" COPYONLY
+  )
+  list(APPEND ARBORX_TEST_QUERY_TREE_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/tstQueryTree${_test}_BF.cpp")
 endforeach()
-add_executable(ArborX_LinearBVH.exe
+add_executable(ArborX_QueryTree.exe
   ${ARBORX_TEST_QUERY_TREE_SOURCES}
-  tstQueryTreeComparisonWithBoost.cpp
-  tstQueryTreeManufacturedSolution.cpp
-  tstQueryTreeCallbacks.cpp
   tstQueryTreeTraversalPolicy.cpp
   tstKokkosToolsAnnotations.cpp
   utf_main.cpp)
-target_link_libraries(ArborX_LinearBVH.exe PRIVATE ArborX Boost::unit_test_framework)
-target_compile_definitions(ArborX_LinearBVH.exe PRIVATE BOOST_TEST_DYN_LINK)
-target_include_directories(ArborX_LinearBVH.exe PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME ArborX_LinearBVH_Test COMMAND ./ArborX_LinearBVH.exe)
+target_link_libraries(ArborX_QueryTree.exe PRIVATE ArborX Boost::unit_test_framework)
+target_compile_definitions(ArborX_QueryTree.exe PRIVATE BOOST_TEST_DYN_LINK)
+target_include_directories(ArborX_QueryTree.exe PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ArborX_QueryTree_Test COMMAND ./ArborX_QueryTree.exe)
 
 add_executable(ArborX_DetailsTreeConstruction.exe tstDetailsTreeConstruction.cpp utf_main.cpp)
 target_link_libraries(ArborX_DetailsTreeConstruction.exe PRIVATE ArborX Boost::unit_test_framework)

@@ -10,127 +10,80 @@
  ****************************************************************************/
 
 #include <ArborX.hpp>
+#include <ArborX_Ray.hpp>
+#include <ArborX_Version.hpp>
 
 #include <Kokkos_Core.hpp>
 
+#include <boost/program_options.hpp>
+
 #include <iostream>
 #include <random>
-#include <vector>
 
 template <typename MemorySpace>
-struct ArborX::AccessTraits<Kokkos::View<ArborX::Sphere *, MemorySpace>,
-                            ArborX::PrimitivesTag>
+struct SpheresToBoxes
 {
-  using Primitives = Kokkos::View<ArborX::Sphere *, MemorySpace>;
-  KOKKOS_FUNCTION static std::size_t size(const Primitives &primitives)
+  Kokkos::View<ArborX::Sphere *, MemorySpace> _spheres;
+};
+
+template <typename MemorySpace>
+struct ArborX::AccessTraits<SpheresToBoxes<MemorySpace>, ArborX::PrimitivesTag>
+{
+  using memory_space = MemorySpace;
+
+  KOKKOS_FUNCTION static std::size_t
+  size(const SpheresToBoxes<MemorySpace> &stob)
   {
-    return primitives.extent(0);
+    return stob._spheres.extent(0);
   }
-  KOKKOS_FUNCTION static ArborX::Box get(Primitives const &primitives,
-                                         std::size_t i)
+  KOKKOS_FUNCTION static ArborX::Box
+  get(SpheresToBoxes<MemorySpace> const &stobs, std::size_t const i)
   {
-    auto const &sphere = primitives(i);
+    auto const &sphere = stobs._spheres(i);
     auto const &c = sphere.centroid();
-    auto const &r = sphere.radious();
+    auto const r = sphere.radius();
     return {{c[0] - r, c[1] - r, c[2] - r}, {c[0] + r, c[1] + r, c[2] + r}};
   }
-  using memory_space = MemorySpace;
 };
 
 template <typename MemorySpace>
-struct ArborX::AccessTraits<Kokkos::View<ArborX::Ray *, MemorySpace>,
-                            ArborX::PredicatesTag>
+struct Rays
 {
-  using Predicates = Kokkos::View<ArborX::Ray *, MemorySpace>;
-  KOKKOS_FUNCTION static std::size_t size(const Predicates &predicates)
-  {
-    return predicates.extent(0);
-  }
-  KOKKOS_FUNCTION static auto get(Predicates const &predicates, std::size_t i)
-  {
-    return attach(intersects(predicates(i)), (int)i);
-  }
-  using memory_space = MemorySpace;
+  Kokkos::View<ArborX::Experimental::Ray *, MemorySpace> _rays;
 };
 
 template <typename MemorySpace>
-struct Callback
+struct ArborX::AccessTraits<Rays<MemorySpace>, ArborX::PredicatesTag>
 {
-  using Primitives = Kokkos::View<ArborX::Sphere *, MemorySpace>;
-  using Vector = ArborX::Point;
+  using memory_space = MemorySpace;
 
-  Primitives spheres;
-
-  Kokkos::View<float *, MemorySpace, Kokkos::MemoryTraits<Kokkos::Atomic>>
-      accumulator;
-
-  KOKKOS_FUNCTION float dotproduct(Vector const &v1, Vector const &v2) const
+  KOKKOS_FUNCTION static std::size_t size(const Rays<MemorySpace> &rays)
   {
-    return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
+    return rays._rays.extent(0);
   }
-
-  KOKKOS_FUNCTION float solveQuadratic(const float &b, const float &c) const
+  KOKKOS_FUNCTION static auto get(Rays<MemorySpace> const &rays, std::size_t i)
   {
-    float delta = b * b - 4.0 * c;
-    if (delta <= 0.0)
-      // NO intersection
-      return 0.0;
-    else
-    {
-      float q = (b > 0) ? -0.5 * (b + std::sqrt(delta))
-                        : -0.5 * (b - std::sqrt(delta));
-
-      // printf("q=%f, c/q = %f \n", q, c / q);
-
-      if (q < 0)
-      {
-        // both intersections are BEHIND
-        if (c > 0)
-          return 0.0;
-        // one point is behind
-        else
-          return c / q;
-      }
-      else
-      {
-        // both intersections are AHEAD
-        if (c > 0)
-          return std::abs(q - c / q);
-        // one point is behind
-        else
-          return q;
-      }
-    }
+    return attach(intersects(rays._rays(i)), (int)i);
   }
+};
 
-  KOKKOS_FUNCTION float overlap_distance(ArborX::Ray const &ray,
-                                         ArborX::Sphere const &sphere) const
-  {
-    auto center = sphere.centroid();
-    auto r = sphere.radius();
-
-    ArborX::Point orig = ray.origin();
-
-    Vector L{orig[0] - center[0], orig[1] - center[1], orig[2] - center[2]};
-
-    //  for normalized direction vector a = 1.0
-    auto dir = ray.direction();
-
-    float b = 2.0 * dotproduct(dir, L);
-    float c = dotproduct(L, L) - r * r;
-
-    return solveQuadratic(b, c);
-  }
+template <typename MemorySpace>
+struct AccumRaySphereInterDist
+{
+  Kokkos::View<ArborX::Sphere *, MemorySpace> _spheres;
+  Kokkos::View<float *, MemorySpace> _accumulator;
 
   template <typename Predicate>
   KOKKOS_FUNCTION void operator()(Predicate const &predicate,
-                                  int primitive_index) const
+                                  int const primitive_index) const
   {
     auto const &ray = ArborX::getGeometry(predicate);
-    auto const &sphere = spheres(primitive_index);
-    float length = overlap_distance(ray, sphere);
-    int i = getData(predicate);
-    accumulator(i) += length;
+    auto const &sphere = _spheres(primitive_index);
+
+    float const length = overlapDistance(ray, sphere);
+    int const i = getData(predicate);
+
+    Kokkos::atomic_fetch_add(&_accumulator(i), length);
   }
 };
 
@@ -139,74 +92,109 @@ int main(int argc, char *argv[])
   using ExecutionSpace = Kokkos::DefaultExecutionSpace;
   using MemorySpace = ExecutionSpace::memory_space;
 
-  using Primitives = Kokkos::View<ArborX::Sphere *, MemorySpace>;
-  using Predicates = Kokkos::View<ArborX::Ray *, MemorySpace>;
-
   Kokkos::ScopeGuard guard(argc, argv);
 
-  // size of the domain (LxLxL)
-  const float L = 100.0;
+  namespace bpo = boost::program_options;
 
-  // number of primitives
-  int const n = 100;
-  std::vector<ArborX::Sphere> spheres;
+  int num_spheres;
+  int num_rays;
+  float L;
+
+  bpo::options_description desc("Allowed options");
+  // clang-format off
+  desc.add_options()
+    ( "help", "help message" )
+    ("spheres", bpo::value<int>(&num_spheres)->default_value(100), "number of spheres")
+    ("rays", bpo::value<int>(&num_rays)->default_value(10000), "number of rays")
+    ("L", bpo::value<float>(&L)->default_value(100.0), "size of the domain")
+    ;
+  // clang-format on
+  bpo::variables_map vm;
+  bpo::store(bpo::command_line_parser(argc, argv).options(desc).run(), vm);
+  bpo::notify(vm);
+
+  if (vm.count("help") > 0)
+  {
+    std::cout << desc << '\n';
+    return 1;
+  }
+
+  std::cout << "ArborX version: " << ArborX::version() << std::endl;
+  std::cout << "ArborX hash   : " << ArborX::gitCommitHash() << std::endl;
+
   std::uniform_real_distribution<float> uniform{0.0, 1.0};
   std::default_random_engine gen;
-  auto rd_uniform = [&]() { return uniform(gen); };
+  auto rand_uniform = [&]() { return uniform(gen); };
 
-  // radius
+  // Random parameters for Gaussian distribution of radii
   const float mu_R = 1.0;
   const float sigma_R = mu_R / 3.0;
 
   std::normal_distribution<> normal{mu_R, sigma_R};
-  auto rd_normal = [&]() { return std::max(normal(gen), 0.0); };
+  auto rand_normal = [&]() { return std::max(normal(gen), 0.0); };
 
-  Primitives spheres_view("spheres_view", n);
-  auto spheres_host = Kokkos::create_mirror_view(spheres_view);
-  for (int i = 0; i < n; ++i)
+  // Construct spheres
+  //
+  // The centers of spheres are uniformly sampling the domain. The radii of
+  // spheres have Gaussian (mu_R, sigma_R) sampling.
+  Kokkos::View<ArborX::Sphere *, MemorySpace> spheres(
+      Kokkos::ViewAllocateWithoutInitializing("spheres"), num_spheres);
+  auto spheres_host = Kokkos::create_mirror_view(spheres);
+  for (int i = 0; i < num_spheres; ++i)
   {
-    spheres_host[i].centroid() = {rd_uniform(), rd_uniform(), rd_uniform()};
-    spheres_host[i].radius() = rd_normal();
+    spheres_host(i) = {
+        {rand_uniform() * L, rand_uniform() * L, rand_uniform() * L},
+        rand_normal()};
   }
-  Kokkos::deep_copy(spheres_view, spheres_host);
-  ArborX::BVH<MemorySpace> bvh{ExecutionSpace{}, spheres_view};
+  Kokkos::deep_copy(spheres, spheres_host);
 
-  // initialize predicates
-  int const m = 10000;
+  // Construct rays
+  //
+  // The origins of rays are uniformly sampling the bottom surface of the
+  // domain. The direction vectors are uniformly sampling of a cosine-weighted
+  // hemisphere, It requires expressing the direction vector in the spherical
+  // coordinates as:
+  //    {sinpolar * cosazimuth, sinpolar * sinazimuth, cospolar}
+  // A detailed description can be found in the slides here (slide 47):
+  // https://cg.informatik.uni-freiburg.de/course_notes/graphics2_08_renderingEquation.pdf
+  Kokkos::View<ArborX::Experimental::Ray *, MemorySpace> rays(
+      Kokkos::ViewAllocateWithoutInitializing("rays"), num_rays);
+  auto rays_host = Kokkos::create_mirror_view(rays);
 
-  std::vector<ArborX::Ray> rays;
-  std::generate_n(std::back_inserter(rays), m, [&]() {
-    float x = rd_uniform() * L;
-    float y = rd_uniform() * L;
-    float z = 0.0;
-
-    float sinazimuth = std::sin(rd_uniform() * 2.0 * M_PI);
-    float cosazimuth = std::sqrt(1 - sinazimuth * sinazimuth);
-    float cospolar = 1.0 - rd_uniform();
-    float sinpolar = std::sqrt(1.0 - cospolar * cospolar);
-
-    float dirx = sinpolar * cosazimuth;
-    float diry = sinpolar * sinazimuth;
-    float dirz = cospolar;
-
-    return ArborX::Ray{{x, y, z}, {dirx, diry, dirz}};
-  });
-
-  Predicates rays_view("rays_view", m);
-  auto rays_host = Kokkos::create_mirror_view(rays_view);
-  for (int i = 0; i < m; ++i)
+  for (int i = 0; i < num_rays; ++i)
   {
-    rays_host[i] = rays[i];
+    float xi_1 = rand_uniform();
+    float xi_2 = rand_uniform();
+
+    rays_host(i) = {ArborX::Point{rand_uniform() * L, rand_uniform() * L, 0.f},
+                    ArborX::Experimental::Ray::Vector{
+                        float(std::cos(2 * M_PI * xi_2) * std::sqrt(xi_1)),
+                        float(std::sin(2 * M_PI * xi_2) * std::sqrt(xi_1)),
+                        std::sqrt(1.f - xi_1)}};
   }
+  Kokkos::deep_copy(rays, rays_host);
 
-  Kokkos::deep_copy(rays_view, rays_host);
+  Kokkos::Timer timer;
 
-  {
-    // accumulator
-    Kokkos::View<float *, MemorySpace> overlap_view("overlap_view", m);
+  ExecutionSpace exec_space{};
 
-    bvh.query(ExecutionSpace{}, rays_view,
-              Callback<MemorySpace>{spheres_view, overlap_view});
-  }
-  return 0;
+  exec_space.fence();
+  timer.reset();
+  ArborX::BVH<MemorySpace> bvh{exec_space,
+                               SpheresToBoxes<MemorySpace>{spheres}};
+
+  Kokkos::View<float *, MemorySpace> accumulator("accumulator", num_rays);
+  bvh.query(exec_space, Rays<MemorySpace>{rays},
+            AccumRaySphereInterDist<MemorySpace>{spheres, accumulator});
+  exec_space.fence();
+  auto time = timer.seconds();
+
+  auto accumulator_avg =
+      ArborX::accumulate(exec_space, accumulator, 0.f) / num_rays;
+
+  printf("time          : %.3f   [%.3fM ray/sec]\n", time,
+         num_rays / (1000000 * time));
+  printf("ray avg       : %.3f\n", accumulator_avg);
+
+  return EXIT_SUCCESS;
 }

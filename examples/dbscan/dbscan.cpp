@@ -11,7 +11,7 @@
 
 #include <ArborX_DBSCAN.hpp>
 #include <ArborX_DetailsHeap.hpp>
-#include <ArborX_DetailsPriorityQueue.hpp> // Less
+#include <ArborX_DetailsOperatorFunctionObjects.hpp> // Less
 #include <ArborX_Version.hpp>
 
 #include <Kokkos_Core.hpp>
@@ -113,7 +113,7 @@ int main(int argc, char *argv[])
         ( "binary", bpo::bool_switch(&binary)->default_value(false), "binary file indicator")
         ( "eps", bpo::value<float>(&eps), "DBSCAN eps" )
         ( "cluster-min-size", bpo::value<int>(&cluster_min_size)->default_value(2), "minimum cluster size")
-        ( "core-min-size", bpo::value<int>(&core_min_size)->default_value(1), "DBSCAN min_pts")
+        ( "core-min-size", bpo::value<int>(&core_min_size)->default_value(2), "DBSCAN min_pts")
         ( "verify", bpo::bool_switch(&verify)->default_value(false), "verify connected components")
         ( "print-dbscan-timers", bpo::bool_switch(&print_dbscan_timers)->default_value(false), "print dbscan timers")
         ( "output-sizes-and-centers", bpo::bool_switch(&print_sizes_centers)->default_value(false), "print cluster sizes and centers")
